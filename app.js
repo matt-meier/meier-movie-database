@@ -1,5 +1,5 @@
 const DATA_TIMEOUT_MS = 20000;
-const CACHE_KEY = "mmdb_payload_v1";
+const CACHE_KEY = "mmdb_payload_v2";
 
 function createSvgEl(tag, attrs = {}, parent = null) {
   const ns = "http://www.w3.org/2000/svg";
@@ -40,18 +40,6 @@ function showEmptyNote(box, message) {
 }
 
 async function loadPayload() {
-  const cached = sessionStorage.getItem(CACHE_KEY);
-  if (cached) {
-    try {
-      const parsed = JSON.parse(cached);
-      if (parsed && parsed.kpis && Array.isArray(parsed.viewings)) {
-        return parsed;
-      }
-    } catch (_) {
-      sessionStorage.removeItem(CACHE_KEY);
-    }
-  }
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DATA_TIMEOUT_MS);
   try {
@@ -69,12 +57,25 @@ async function loadPayload() {
       // Ignore storage quota errors
     }
     return payload;
+  } catch (err) {
+    const cached = sessionStorage.getItem(CACHE_KEY);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.kpis && Array.isArray(parsed.viewings)) {
+          return parsed;
+        }
+      } catch (_) {
+        sessionStorage.removeItem(CACHE_KEY);
+      }
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 }
 
-function renderHorizontalBars(containerId, items, labelKey, valueKey, titleText, maxBars = 10, emptyMsg = "No data available yet.") {
+function renderHorizontalBars(containerId, items, labelKey, valueKey, titleText, maxBars = 10, emptyMsg = "No data available yet.", compact = false) {
   const box = document.getElementById(containerId);
   box.innerHTML = "";
   const slice = (items || []).slice(0, maxBars);
@@ -85,24 +86,37 @@ function renderHorizontalBars(containerId, items, labelKey, valueKey, titleText,
 
   const maxVal = Math.max(...slice.map((d) => Number(d[valueKey]) || 0), 1);
   const rowH = 26;
-  const width = 760;
-  const height = slice.length * rowH + 30;
-  const labelW = 175;
-  const barAreaW = width - labelW - 80;
+  const width = compact ? 420 : 760;
+  const height = slice.length * rowH + 34;
+  const labelW = compact ? 135 : 180;
+  const barAreaW = Math.max(80, width - labelW - 68);
 
-  const svg = createSvgEl("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height });
-  createSvgEl("text", { x: 0, y: 14, fill: "#6E7781", "font-size": 12, "font-weight": 700 }, svg).textContent = titleText;
+  const svg = createSvgEl(
+    "svg",
+    {
+      viewBox: `0 0 ${width} ${height}`,
+      style: "width: 100%; height: auto; display: block; font-family: Lato, sans-serif;",
+    },
+    box
+  );
+
+  createSvgEl("text", { x: 0, y: 15, fill: "#6E7781", "font-size": 12, "font-weight": 700 }, svg).textContent = titleText;
 
   slice.forEach((d, i) => {
-    const y = 26 + i * rowH;
+    const y = 28 + i * rowH;
     const val = Number(d[valueKey]) || 0;
     const barW = Math.max(2, (val / maxVal) * barAreaW);
     const fill = i === 0 ? "#F5C518" : "#6E7781";
+    const labelStr = String(d[labelKey] ?? "");
+    const displayLabel = compact && labelStr.length > 18 ? `${labelStr.slice(0, 17)}...` : labelStr;
 
-    createSvgEl("text", { x: labelW - 10, y: y + 14, "text-anchor": "end", fill: "#1F2328", "font-size": 12 }, svg).textContent =
-      String(d[labelKey] || "");
-    createSvgEl("rect", { x: labelW, y: y + 2, width: barW, height: 16, rx: 4, fill }, svg);
-    createSvgEl("text", { x: labelW + barW + 8, y: y + 14, fill: "#1F2328", "font-size": 12, "font-weight": 700 }, svg).textContent =
+    const g = createSvgEl("g", {}, svg);
+    const titleEl = createSvgEl("title", {}, g);
+    titleEl.textContent = `${labelStr}: ${formatNumber(val)}`;
+
+    createSvgEl("text", { x: labelW - 10, y: y + 14, "text-anchor": "end", fill: "#1F2328", "font-size": 12 }, g).textContent = displayLabel;
+    createSvgEl("rect", { x: labelW, y: y + 2, width: barW, height: 16, rx: 4, fill }, g);
+    createSvgEl("text", { x: labelW + barW + 8, y: y + 14, fill: "#1F2328", "font-size": 12, "font-weight": 700 }, g).textContent =
       formatNumber(val);
   });
 }
@@ -125,14 +139,22 @@ function renderGenreMatrix(containerId, genreData) {
     if (p.viewings > maxPair) maxPair = p.viewings;
   });
 
-  const cell = 38;
-  const padLeft = 96;
-  const padTop = 76;
-  const width = padLeft + topGenres.length * cell + 16;
+  const cell = 44;
+  const padLeft = 104;
+  const padTop = 84;
+  const width = padLeft + topGenres.length * cell + 20;
   const height = padTop + topGenres.length * cell + 16;
-  const svg = createSvgEl("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height });
 
-  createSvgEl("text", { x: 0, y: 14, fill: "#6E7781", "font-size": 12, "font-weight": 700 }, svg).textContent =
+  const svg = createSvgEl(
+    "svg",
+    {
+      viewBox: `0 0 ${width} ${height}`,
+      style: "width: 100%; max-width: 520px; height: auto; display: block; font-family: Lato, sans-serif;",
+    },
+    box
+  );
+
+  createSvgEl("text", { x: 0, y: 15, fill: "#6E7781", "font-size": 12, "font-weight": 700 }, svg).textContent =
     "Genre Co-Occurrence Matrix (Top 8 Genres)";
 
   topGenres.forEach((g, idx) => {
@@ -142,7 +164,7 @@ function renderGenreMatrix(containerId, genreData) {
       x: cx,
       y: padTop - 8,
       fill: "#1F2328",
-      "font-size": 10,
+      "font-size": 11,
       "text-anchor": "start",
       transform: `rotate(-35 ${cx} ${padTop - 8})`,
     }, svg).textContent = g;
@@ -165,7 +187,9 @@ function renderGenreMatrix(containerId, genreData) {
         return;
       }
       const val = pairMap.get(`${rowG}|${colG}`) || 0;
-      const alpha = val > 0 ? 0.15 + 0.85 * (val / maxPair) : 0.04;
+      const alpha = val > 0 ? 0.18 + 0.82 * (val / maxPair) : 0.05;
+      const cellGroup = createSvgEl("g", {}, svg);
+      createSvgEl("title", {}, cellGroup).textContent = `${rowG} + ${colG}: ${formatNumber(val)} viewings`;
       createSvgEl("rect", {
         x: x + 2,
         y: y + 2,
@@ -174,16 +198,16 @@ function renderGenreMatrix(containerId, genreData) {
         rx: 4,
         fill: val > 0 ? "#F5C518" : "#6E7781",
         opacity: Number(alpha.toFixed(2)),
-      }, svg);
+      }, cellGroup);
       if (val > 0) {
         createSvgEl("text", {
           x: x + cell / 2,
           y: y + cell / 2 + 4,
           fill: "#111111",
-          "font-size": 10,
+          "font-size": 11,
           "font-weight": 700,
           "text-anchor": "middle",
-        }, svg).textContent = String(val);
+        }, cellGroup).textContent = String(val);
       }
     });
   });
@@ -201,8 +225,8 @@ function renderRecencyScatter(containerId, viewings) {
   }
 
   const width = 760;
-  const height = 220;
-  const pad = { top: 24, right: 20, bottom: 34, left: 48 };
+  const height = 240;
+  const pad = { top: 28, right: 24, bottom: 36, left: 50 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
 
@@ -214,15 +238,25 @@ function renderRecencyScatter(containerId, viewings) {
   const xScale = (yr) => pad.left + ((yr - minRel) / Math.max(maxRel - minRel, 1)) * plotW;
   const yScale = (yr) => pad.top + plotH - ((yr - minWat) / Math.max(maxWat - minWat, 1)) * plotH;
 
-  const svg = createSvgEl("svg", { viewBox: `0 0 ${width} ${height}`, width: "100%", height });
-  createSvgEl("text", { x: 0, y: 14, fill: "#6E7781", "font-size": 12, "font-weight": 700 }, svg).textContent =
+  const svg = createSvgEl(
+    "svg",
+    {
+      viewBox: `0 0 ${width} ${height}`,
+      style: "width: 100%; height: auto; display: block; font-family: Lato, sans-serif;",
+    },
+    box
+  );
+
+  createSvgEl("text", { x: 0, y: 15, fill: "#6E7781", "font-size": 12, "font-weight": 700 }, svg).textContent =
     "Release Year (X) vs. Watch Year (Y): Gold = Watched Within 2 Years of Release";
 
   createSvgEl("line", { x1: pad.left, y1: pad.top + plotH, x2: pad.left + plotW, y2: pad.top + plotH, stroke: "#CBD2D9" }, svg);
   createSvgEl("line", { x1: pad.left, y1: pad.top, x2: pad.left, y2: pad.top + plotH, stroke: "#CBD2D9" }, svg);
 
-  createSvgEl("text", { x: pad.left, y: height - 8, fill: "#6E7781", "font-size": 11 }, svg).textContent = String(minRel);
-  createSvgEl("text", { x: pad.left + plotW, y: height - 8, "text-anchor": "end", fill: "#6E7781", "font-size": 11 }, svg).textContent =
+  createSvgEl("text", { x: pad.left, y: height - 10, fill: "#6E7781", "font-size": 11 }, svg).textContent = String(minRel);
+  createSvgEl("text", { x: pad.left + plotW / 2, y: height - 10, "text-anchor": "middle", fill: "#6E7781", "font-size": 11 }, svg).textContent =
+    "Release Year";
+  createSvgEl("text", { x: pad.left + plotW, y: height - 10, "text-anchor": "end", fill: "#6E7781", "font-size": 11 }, svg).textContent =
     String(maxRel);
   createSvgEl("text", { x: 4, y: pad.top + 8, fill: "#6E7781", "font-size": 11 }, svg).textContent = String(maxWat);
   createSvgEl("text", { x: 4, y: pad.top + plotH, fill: "#6E7781", "font-size": 11 }, svg).textContent = String(minWat);
@@ -232,17 +266,18 @@ function renderRecencyScatter(containerId, viewings) {
     const cy = yScale(Number(p.watchYear));
     const lag = Number(p.recencyLagYears);
     const isRecent = Number.isFinite(lag) && lag <= 2;
-    createSvgEl(
+    const dot = createSvgEl(
       "circle",
       {
         cx,
         cy,
         r: isRecent ? 3.5 : 2.8,
         fill: isRecent ? "#F5C518" : "#6E7781",
-        opacity: isRecent ? 0.9 : 0.55,
+        opacity: isRecent ? 0.85 : 0.45,
       },
       svg
     );
+    createSvgEl("title", {}, dot).textContent = `${p.title} (${p.releaseYear}) watched ${p.watchDate}`;
   });
 }
 
@@ -333,6 +368,27 @@ function populateInsights(payload) {
       `${topGenre.genre} leads your log with ${formatNumber(topGenre.viewings)} viewings.${pairText}`;
   }
 
+  const withLag = (payload.viewings || []).filter((v) => Number.isFinite(Number(v.recencyLagYears)));
+  if (withLag.length) {
+    const recentCount = withLag.filter((v) => Number(v.recencyLagYears) <= 2).length;
+    const recentPct = ((recentCount / withLag.length) * 100).toFixed(1);
+    const sortedLags = withLag.map((v) => Number(v.recencyLagYears)).sort((a, b) => a - b);
+    const medianLag = sortedLags[Math.floor(sortedLags.length / 2)];
+    const topEra = [...(payload.releaseEras || [])].sort((a, b) => b.uniqueFilms - a.uniqueFilms)[0];
+    const eraText = topEra ? ` The ${topEra.era} contribute the most unique films (${formatNumber(topEra.uniqueFilms)}).` : "";
+    document.getElementById("insightRecency").textContent =
+      `${recentPct}% of your viewings happen within 2 years of release, with a median film age of ${medianLag} years at watch time.${eraText}`;
+  }
+
+  const rated = (payload.viewings || []).filter((v) => Number.isFinite(Number(v.imdbRating)));
+  if (rated.length) {
+    const avgRating = (rated.reduce((sum, v) => sum + Number(v.imdbRating), 0) / rated.length).toFixed(2);
+    const peakBin = [...(payload.ratingDistribution || [])].sort((a, b) => b.viewings - a.viewings)[0];
+    const peakText = peakBin ? ` Viewings cluster most heavily around IMDb ${peakBin.rating} (${formatNumber(peakBin.viewings)} viewings).` : "";
+    document.getElementById("insightRatings").textContent =
+      `Your logged viewings average an IMDb score of ${avgRating}/10.${peakText}`;
+  }
+
   const peakMonth = [...(payload.seasonality?.monthly || [])].sort((a, b) => b.viewings - a.viewings)[0];
   const peakDow = [...(payload.seasonality?.dayOfWeek || [])].sort((a, b) => b.viewings - a.viewings)[0];
   if (peakMonth && peakDow) {
@@ -341,9 +397,11 @@ function populateInsights(payload) {
   }
 
   const topRewatch = payload.topRewatched?.[0];
+  const topActor = payload.credits?.actors?.[0];
   if (topRewatch) {
+    const actorText = topActor ? ` ${topActor.name} is your most watched actor (${formatNumber(topActor.viewings)} viewings).` : "";
     document.getElementById("insightCredits").textContent =
-      `${topRewatch.title} leads repeat viewings at ${topRewatch.views} total watches, anchoring your core rewatch rotation.`;
+      `${topRewatch.title} leads repeat viewings at ${topRewatch.views} total watches.${actorText}`;
   }
 }
 
@@ -444,14 +502,14 @@ async function init() {
       rewatchBox.appendChild(chip);
     });
 
-    renderHorizontalBars("latencyChart", payload.rewatchLatency?.buckets || [], "bucket", "count", "Rewatch Gap Buckets", 6);
+    renderHorizontalBars("latencyChart", payload.rewatchLatency?.buckets || [], "bucket", "count", "Rewatch Gap Buckets", 6, "No rewatch gaps found.", true);
 
     let activeSeason = "monthly";
     const drawSeasonality = () => {
       if (activeSeason === "monthly") {
-        renderHorizontalBars("seasonalityChart", payload.seasonality?.monthly || [], "label", "viewings", "Viewings by Calendar Month", 12);
+        renderHorizontalBars("seasonalityChart", payload.seasonality?.monthly || [], "label", "viewings", "Viewings by Calendar Month", 12, "No monthly data.", true);
       } else {
-        renderHorizontalBars("seasonalityChart", payload.seasonality?.dayOfWeek || [], "day", "viewings", "Viewings by Day of Week", 7);
+        renderHorizontalBars("seasonalityChart", payload.seasonality?.dayOfWeek || [], "day", "viewings", "Viewings by Day of Week", 7, "No weekday data.", true);
       }
     };
     drawSeasonality();
@@ -471,9 +529,10 @@ async function init() {
       "avgRuntimeMinutes",
       "Average Runtime (Minutes) by Watch Year",
       20,
-      "Runtime trend by watch year will populate once IMDb title.basics.tsv.gz is synced."
+      "Runtime trend by watch year will populate once IMDb title.basics.tsv.gz is synced.",
+      true
     );
-    renderHorizontalBars("voteDepthChart", payload.voteDepth || [], "tier", "viewings", "Viewings by IMDb Vote Depth", 6);
+    renderHorizontalBars("voteDepthChart", payload.voteDepth || [], "tier", "viewings", "Viewings by IMDb Vote Depth", 6, "No vote depth data.", true);
 
     populateInsights(payload);
 
@@ -484,7 +543,7 @@ async function init() {
 
     banner.textContent = payload.meta?.imdbDatasetsIncluded
       ? "Synced with IMDb non-commercial datasets."
-      : "Loaded starter film log data (1,952 viewings). Run scripts/build_data.py or the GitHub Action to join live IMDb metadata.";
+      : "Loaded starter film log data. Run scripts/build_data.py or the GitHub Action to join live IMDb metadata.";
   } catch (err) {
     banner.textContent = `Unable to load ./data.json: ${err.message}. Serve over HTTP (python -m http.server 8000) or run the GitHub Action first.`;
   }
