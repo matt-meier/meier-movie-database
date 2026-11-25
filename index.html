@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meier Movie Database (MMDb)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="mmdb-shell" id="app">
+    <header class="mmdb-header">
+      <div class="mmdb-title-group">
+        <span class="mmdb-badge" aria-label="MMDb">MMDb</span>
+        <div>
+          <h1>Meier Movie Database</h1>
+          <p class="mmdb-subtitle">Personal viewing log matched by IMDb title ID against non-commercial IMDb datasets.</p>
+        </div>
+      </div>
+      <div class="mmdb-span-meta" id="dateRangeLabel">Loading log...</div>
+    </header>
+
+    <div id="statusBanner" class="status-banner" role="status">Loading dashboard data...</div>
+
+    <section class="kpi-strip" aria-label="Key viewing metrics">
+      <article class="kpi-card">
+        <span class="kpi-label">Unique Films</span>
+        <strong class="kpi-value" id="kpiUnique">--</strong>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Total Viewings</span>
+        <strong class="kpi-value" id="kpiViewings">--</strong>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Rewatch Rate</span>
+        <strong class="kpi-value" id="kpiRewatch">--</strong>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Cumulative Watch Time</span>
+        <strong class="kpi-value" id="kpiRuntime">--</strong>
+        <span class="kpi-sub" id="kpiRuntimeSub">--</span>
+      </article>
+    </section>
+
+    <section class="recent-watch-card" aria-label="Most recent film watched">
+      <div class="recent-kicker">MOST RECENT WATCH</div>
+      <div class="recent-main">
+        <div>
+          <h2 id="recentTitle">--</h2>
+          <p id="recentMeta" class="recent-meta">--</p>
+        </div>
+        <div class="recent-pills" id="recentPills"></div>
+      </div>
+    </section>
+
+    <section class="band-row" id="bandGenres">
+      <div class="panel-card">
+        <div class="panel-head">
+          <h3>Top Genres &amp; Co-Occurrence Matrix</h3>
+          <p class="panel-sub">Viewing counts by genre and multi-genre overlap across your log.</p>
+        </div>
+        <div id="genreBarsChart" class="chart-box"></div>
+        <div id="genreMatrixChart" class="chart-box"></div>
+      </div>
+      <aside class="insight-card">
+        <span class="insight-tag">INSIGHT</span>
+        <p id="insightGenres">Leading genres and frequent co-occurrences shape your core viewing identity.</p>
+      </aside>
+    </section>
+
+    <section class="band-row" id="bandRecencyEras">
+      <div class="panel-card">
+        <div class="panel-head row-between">
+          <div>
+            <h3>Recency Bias &amp; Release Era Distribution</h3>
+            <p class="panel-sub">Watch year versus release year lag alongside unique films and cumulative watch hours by decade.</p>
+          </div>
+          <div class="role-tabs" role="tablist" aria-label="Release era metric selector">
+            <button type="button" class="era-tab active" data-metric="uniqueFilms">Unique Films</button>
+            <button type="button" class="era-tab" data-metric="cumulativeHours">Cumulative Hours</button>
+          </div>
+        </div>
+        <div id="recencyScatterChart" class="chart-box"></div>
+        <div id="eraDistributionChart" class="chart-box"></div>
+      </div>
+      <aside class="insight-card">
+        <span class="insight-tag">INSIGHT</span>
+        <p id="insightRecency">Comparing watch year against release year reveals new-release appetite versus catalog revisits.</p>
+      </aside>
+    </section>
+
+    <section class="band-row" id="bandRatings">
+      <div class="panel-card">
+        <div class="panel-head">
+          <h3>Viewings by IMDb Rating</h3>
+          <p class="panel-sub">Distribution of logged viewings across IMDb average rating brackets.</p>
+        </div>
+        <div id="ratingDistChart" class="chart-box"></div>
+      </div>
+      <aside class="insight-card">
+        <span class="insight-tag">INSIGHT</span>
+        <p id="insightRatings">Rating distribution shows whether you favor high-consensus classics or crowd-pleasing middle tiers.</p>
+      </aside>
+    </section>
+
+    <section class="band-row" id="bandCreditsRewatches">
+      <div class="panel-card">
+        <div class="panel-head row-between">
+          <div>
+            <h3>Most Watched Credits &amp; Top Rewatched Films</h3>
+            <p class="panel-sub">Switch credit role to inspect actors, directors, writers, or producers.</p>
+          </div>
+          <div class="role-tabs" role="tablist" aria-label="Credit role selector">
+            <button type="button" class="role-tab active" data-role="actors">Actors</button>
+            <button type="button" class="role-tab" data-role="directors">Directors</button>
+            <button type="button" class="role-tab" data-role="writers">Writers</button>
+            <button type="button" class="role-tab" data-role="producers">Producers</button>
+          </div>
+        </div>
+        <div id="creditsChart" class="chart-box"></div>
+        <div class="subhead-label">Most Watched Movies of All Time</div>
+        <div id="topRewatchedList" class="rewatch-list"></div>
+      </div>
+      <aside class="insight-card">
+        <span class="insight-tag">INSIGHT</span>
+        <p id="insightCredits">Repeat viewings concentrate around franchise staples and seasonal comfort favorites.</p>
+      </aside>
+    </section>
+
+    <section class="band-row" id="bandBehavior">
+      <div class="panel-card">
+        <div class="panel-head row-between">
+          <div>
+            <h3>Rewatch Latency, Seasonality, Runtime Shift &amp; Vote Depth</h3>
+            <p class="panel-sub">Gap days between rewatches, monthly and weekday cadence, runtime trend, and IMDb vote tiers.</p>
+          </div>
+          <div class="role-tabs" role="tablist" aria-label="Seasonality view selector">
+            <button type="button" class="season-tab active" data-season="monthly">By Month</button>
+            <button type="button" class="season-tab" data-season="dayOfWeek">By Weekday</button>
+          </div>
+        </div>
+        <div class="subgrid-two">
+          <div id="latencyChart" class="chart-box"></div>
+          <div id="seasonalityChart" class="chart-box"></div>
+        </div>
+        <div class="subgrid-two">
+          <div id="runtimeTrendChart" class="chart-box"></div>
+          <div id="voteDepthChart" class="chart-box"></div>
+        </div>
+      </div>
+      <aside class="insight-card">
+        <span class="insight-tag">INSIGHT</span>
+        <p id="insightBehavior">Viewing spikes cluster in key months and weekends while runtime and vote depth evolve over time.</p>
+      </aside>
+    </section>
+
+    <section class="log-section" id="bandLog">
+      <div class="panel-card">
+        <div class="panel-head row-between">
+          <div>
+            <h3>Complete Viewing Log (Newest First)</h3>
+            <p class="panel-sub" id="logCountLabel">Showing all logged viewings.</p>
+          </div>
+          <div class="log-filters">
+            <input type="search" id="searchMovie" placeholder="Search movie or ID..." aria-label="Search movie" />
+            <input type="search" id="searchGenre" placeholder="Filter genre..." aria-label="Filter genre" />
+            <input type="search" id="searchYear" placeholder="Filter year (watch or release)..." aria-label="Filter year" />
+          </div>
+        </div>
+        <div class="log-scroll-wrap" id="viewingLogWrap">
+          <table class="log-table">
+            <thead>
+              <tr>
+                <th>Date Watched</th>
+                <th>Film</th>
+                <th class="num-col">Release</th>
+                <th>Genres</th>
+                <th class="num-col">IMDb Rating</th>
+                <th class="num-col">Runtime</th>
+                <th class="num-col">Viewing #</th>
+              </tr>
+            </thead>
+            <tbody id="viewingLogBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer class="mmdb-footer" role="contentinfo">
+      <div class="footer-inner">
+        <div class="footer-icons">
+          <a href="https://www.linkedin.com/in/meier2k8/" target="_blank" rel="noopener noreferrer" aria-label="Matt Meier LinkedIn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M19 3A2 2 0 0 1 21 5V19A2 2 0 0 1 19 21H5A2 2 0 0 1 3 19V5A2 2 0 0 1 5 3H19M18.5 18.5V13.2A3.26 3.26 0 0 0 15.24 9.94C14.39 9.94 13.4 10.46 12.92 11.24V10.13H10.13V18.5H12.92V13.57C12.92 12.8 13.54 12.17 14.31 12.17A1.4 1.4 0 0 1 15.71 13.57V18.5H18.5M6.88 8.56A1.68 1.68 0 0 0 8.56 6.88C8.56 5.95 7.81 5.19 6.88 5.19A1.69 1.69 0 0 0 5.19 6.88C5.19 7.81 5.95 8.56 6.88 8.56M8.27 18.5V10.13H5.5V18.5H8.27Z" />
+            </svg>
+          </a>
+          <a href="https://public.tableau.com/app/profile/matt5450/vizzes" target="_blank" rel="noopener noreferrer" aria-label="Matt Meier Tableau Public">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M11.25 2.5H12.75V6.5H16.75V8H12.75V12H11.25V8H7.25V6.5H11.25V2.5ZM5.25 10.5H6.5V13H9V14.25H6.5V16.75H5.25V14.25H2.75V13H5.25V10.5ZM17.5 10.5H18.75V13H21.25V14.25H18.75V16.75H17.5V14.25H15V13H17.5V10.5ZM11.35 14H12.65V16.65H15.3V17.95H12.65V20.6H11.35V17.95H8.7V16.65H11.35V14Z" />
+            </svg>
+          </a>
+        </div>
+        <div class="footer-text">
+          CREATED BY MATT MEIER  |  #MEIERMOVIEDATABASE 2026  |  SOURCE: PERSONAL FILM LOG &amp; IMDB NON-COMMERCIAL DATASETS
+        </div>
+      </div>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
