@@ -2,7 +2,6 @@ name: Update MMDb Data
 
 on:
   schedule:
-    # Runs daily at 06:00 UTC (midnight CST)
     - cron: "0 6 * * *"
   workflow_dispatch:
 
@@ -26,9 +25,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy
 
-      - name: Build data.json from film log and IMDb datasets
+      - name: Build data.json from film log, IMDb datasets, and optional TMDb media
         env:
           SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: |
           python scripts/build_data.py --out data.json
 
@@ -40,6 +40,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to data.json."
           else
-            git commit -m "chore: refresh data.json from film log and IMDb datasets"
+            git commit -m "chore: refresh MMDb data.json"
             git push
           fi
