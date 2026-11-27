@@ -44,7 +44,7 @@ body {
   font-family: "Lato", sans-serif;
   font-size: 12px;
   line-height: 1.45;
-  max-width: 320px;
+  max-width: min(320px, calc(100vw - 20px));
   box-shadow: 0 8px 24px rgba(17, 17, 17, 0.24);
 }
 
@@ -1000,6 +1000,87 @@ h1 {
   font-size: 11px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
+}
+
+
+/* Viewing Log Download Button */
+.log-download-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #D4A70F;
+  background: var(--imdb-yellow);
+  color: var(--imdb-ink);
+  font-family: "Poppins", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, transform 0.12s ease, opacity 0.14s ease;
+}
+
+.download-btn:hover:not(:disabled) {
+  background: #E5B60F;
+  transform: translateY(-1px);
+}
+
+.download-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.download-btn-secondary {
+  background: var(--bg-canvas);
+  color: var(--ink-primary);
+  border-color: var(--border-soft);
+}
+
+.download-btn-secondary:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .mmdb-tooltip.visible {
+    pointer-events: auto;
+  }
+  .tt-close-btn {
+    min-width: 30px;
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 640px) {
+  .mmdb-shell {
+    padding: 0 14px;
+  }
+  .panel-card {
+    padding: 18px 16px;
+  }
+  #bandLog .panel-title-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .log-download-actions {
+    margin-left: 0;
+  }
+  .log-filters input {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 @media (max-width: 960px) {

@@ -1,5 +1,5 @@
 const DATA_TIMEOUT_MS = 20000;
-const CACHE_KEY = "mmdb_payload_v5";
+const CACHE_KEY = "mmdb_payload_v6";
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function createSvgEl(tag, attrs = {}, parent = null) {
@@ -245,6 +245,8 @@ document.addEventListener("click", () => hideTooltip(true));
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") hideTooltip(true);
 });
+window.addEventListener("scroll", () => hideTooltip(true), { passive: true });
+window.addEventListener("resize", () => hideTooltip(true));
 
 /* Data Loader */
 async function loadPayload() {
@@ -1453,11 +1455,12 @@ function renderLatencyStrip(containerId, latency) {
   });
 }
 
-/* 10. Complete Scrollable Viewing Log (Point-in-Time Cumulative Runtime + Inline Bar Chart) */
-function renderViewingLog(viewings, maxCumMins) {
+/* 10. Complete Scrollable Viewing Log (Point-in-Time Cumulative Runtime + Inline Bar Chart + CSV Export) */
+function getFilteredViewings(viewings) {
   const qMovie = document.getElementById("searchMovie").value.trim().toLowerCase();
   const qGenre = document.getElementById("searchGenre").value.trim().toLowerCase();
   const qYear = document.getElementById("searchYear").value.trim().toLowerCase();
+  const isFiltered = Boolean(qMovie || qGenre || qYear);
 
   const filtered = (viewings || []).filter((v) => {
     const movieMatch =
@@ -1472,6 +1475,95 @@ function renderViewingLog(viewings, maxCumMins) {
       String(v.releaseYear || "").includes(qYear);
     return movieMatch && genreMatch && yearMatch;
   });
+
+  return { filtered, isFiltered };
+}
+
+function escapeCsvField(val) {
+  if (val === null || val === undefined) return "";
+  const str = String(val);
+  if (str.includes("\"") || str.includes(",") || str.includes("\n") || str.includes("\r")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function exportViewingsToCsv(rows, filename) {
+  const headers = [
+    "Watch Date",
+    "Watch Year",
+    "Film Title",
+    "IMDb ID",
+    "IMDb URL",
+    "Release Year",
+    "Film Age at Watch (Years)",
+    "Genres",
+    "IMDb Rating",
+    "Runtime (Minutes)",
+    "Viewing Number",
+    "Total Views for Film",
+    "Cumulative Runtime at Viewing (Minutes)",
+    "Cumulative Runtime at Viewing (D, H, M)",
+  ];
+
+  const lines = [headers.map(escapeCsvField).join(",")];
+  (rows || []).forEach((v) => {
+    const cumMins = v.cumulativeFilmMinutes;
+    const cumDhm =
+      cumMins !== null && cumMins !== undefined && Number.isFinite(Number(cumMins))
+        ? formatDurationDHM(cumMins, "long")
+        : "";
+    const rowVals = [
+      v.watchDate ?? "",
+      v.watchYear ?? "",
+      v.title ?? "",
+      v.imdbId ?? "",
+      v.imdbId ? imdbTitleUrl(v.imdbId) : "",
+      v.releaseYear ?? "",
+      v.recencyLagYears ?? "",
+      (v.genres || []).join(", "),
+      v.imdbRating ?? "",
+      v.runtimeMinutes ?? "",
+      v.viewingNumber ?? "",
+      v.totalViewsForTitle ?? "",
+      cumMins ?? "",
+      cumDhm,
+    ];
+    lines.push(rowVals.map(escapeCsvField).join(","));
+  });
+
+  const csvBody = "\uFEFF" + lines.join("\r\n");
+  const blob = new Blob([csvBody], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function updateDownloadButtons(filteredCount, totalCount, isFiltered) {
+  const mainBtn = document.getElementById("downloadLogCsv");
+  const mainLbl = document.getElementById("downloadLogCsvLabel");
+  const fullBtn = document.getElementById("downloadFullLogCsv");
+  if (!mainBtn || !mainLbl || !fullBtn) return;
+
+  if (isFiltered) {
+    mainLbl.textContent = `Download Filtered CSV (${formatNumber(filteredCount)})`;
+    mainBtn.disabled = filteredCount === 0;
+    fullBtn.hidden = false;
+  } else {
+    mainLbl.textContent = "Download CSV";
+    mainBtn.disabled = totalCount === 0;
+    fullBtn.hidden = true;
+  }
+}
+
+function renderViewingLog(viewings, maxCumMins) {
+  const { filtered, isFiltered } = getFilteredViewings(viewings);
+  updateDownloadButtons(filtered.length, (viewings || []).length, isFiltered);
 
   const filteredMins = filtered.reduce((sum, v) => sum + (Number.isFinite(Number(v.runtimeMinutes)) ? Number(v.runtimeMinutes) : 0), 0);
   const rtSummary = filteredMins > 0 ? ` | Filtered Total Watch Time: ${formatDurationDHM(filteredMins, "long")}` : "";
@@ -1692,10 +1784,29 @@ async function init() {
     initInsightButtons(payload.insights || {});
 
     const maxCumMins = payload.meta?.maxCumulativeFilmMinutes || 0;
+    const allViewings = payload.viewings || [];
     ["searchMovie", "searchGenre", "searchYear"].forEach((id) => {
-      document.getElementById(id).addEventListener("input", () => renderViewingLog(payload.viewings || [], maxCumMins));
+      document.getElementById(id).addEventListener("input", () => renderViewingLog(allViewings, maxCumMins));
     });
-    renderViewingLog(payload.viewings || [], maxCumMins);
+
+    const dlBtn = document.getElementById("downloadLogCsv");
+    if (dlBtn) {
+      dlBtn.addEventListener("click", () => {
+        const { filtered, isFiltered } = getFilteredViewings(allViewings);
+        const fname = isFiltered
+          ? "meier-movie-database-film-log-filtered.csv"
+          : "meier-movie-database-film-log.csv";
+        exportViewingsToCsv(filtered, fname);
+      });
+    }
+    const dlFullBtn = document.getElementById("downloadFullLogCsv");
+    if (dlFullBtn) {
+      dlFullBtn.addEventListener("click", () => {
+        exportViewingsToCsv(allViewings, "meier-movie-database-film-log.csv");
+      });
+    }
+
+    renderViewingLog(allViewings, maxCumMins);
 
     if (payload.meta?.imdbDatasetsIncluded) {
       banner.textContent = payload.meta?.tmdbMediaIncluded

@@ -240,6 +240,19 @@
             <p class="panel-sub" id="logCountLabel">Showing all logged viewings.</p>
             <div class="link-callout">Click any film title below to open its IMDb page in a new tab.</div>
           </div>
+          <div class="log-download-actions">
+            <button type="button" id="downloadLogCsv" class="download-btn" aria-label="Download viewing log as CSV">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span id="downloadLogCsvLabel">Download CSV</span>
+            </button>
+            <button type="button" id="downloadFullLogCsv" class="download-btn download-btn-secondary" hidden aria-label="Download complete unfiltered viewing log as CSV">
+              Full Log
+            </button>
+          </div>
         </div>
         <div class="panel-controls-row">
           <div class="log-filters">
