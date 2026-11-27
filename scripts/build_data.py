@@ -63,7 +63,7 @@ def load_film_log(csv_path: str | None) -> pd.DataFrame:
         sheet_url = os.environ.get("SHEET_CSV_URL", "").strip()
         if not sheet_url:
             raise ValueError("Provide --csv or set SHEET_CSV_URL environment variable.")
-        req = urllib.request.Request(sheet_url, headers={"User-Agent": "MMDb-Sync/2.0"})
+        req = urllib.request.Request(sheet_url, headers={"User-Agent": "MMDb-Sync/3.0"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw_bytes = resp.read()
         df = pd.read_csv(io.BytesIO(raw_bytes), dtype=str)
@@ -99,7 +99,7 @@ def load_film_log(csv_path: str | None) -> pd.DataFrame:
 
 
 def download_gz_bytes(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "MMDb-Sync/2.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "MMDb-Sync/3.0"})
     with urllib.request.urlopen(req, timeout=180) as resp:
         return resp.read()
 
@@ -209,7 +209,7 @@ def load_existing_media_cache(out_path: Path) -> tuple[dict[str, str], dict[str,
 def fetch_tmdb_media(imdb_id: str, media_kind: str, tmdb_token: str) -> str | None:
     if not tmdb_token or not imdb_id:
         return None
-    headers = {"Accept": "application/json", "User-Agent": "MMDb-Sync/2.0"}
+    headers = {"Accept": "application/json", "User-Agent": "MMDb-Sync/3.0"}
     params = {"external_source": "imdb_id"}
     if len(tmdb_token) > 45:
         headers["Authorization"] = f"Bearer {tmdb_token}"
@@ -239,10 +239,19 @@ def fetch_tmdb_media(imdb_id: str, media_kind: str, tmdb_token: str) -> str | No
     return None
 
 
-def fmt_hours(minutes: float | None) -> str:
+def fmt_dhm(minutes: float | None) -> str:
     if minutes is None or not np.isfinite(minutes):
         return "--"
-    return f"{minutes / 60.0:,.1f} hrs"
+    total_m = int(round(float(minutes)))
+    days = total_m // 1440
+    hrs = (total_m % 1440) // 60
+    mins = total_m % 60
+    d_lbl = "day" if days == 1 else "days"
+    h_lbl = "hr" if hrs == 1 else "hrs"
+    m_lbl = "min" if mins == 1 else "mins"
+    if days > 0:
+        return f"{days:,} {d_lbl}, {hrs} {h_lbl}, {mins} {m_lbl}"
+    return f"{hrs} {h_lbl}, {mins} {m_lbl}"
 
 
 def build_dynamic_insights(payload: dict) -> dict[str, str]:
@@ -269,8 +278,9 @@ def build_dynamic_insights(payload: dict) -> dict[str, str]:
             if pace_era
             else ""
         )
+        rt_bit = f" ({fmt_dhm(peak_q['totalMinutes'])})" if peak_q.get("totalMinutes", 0) > 0 else ""
         timeline_ins = (
-            f"Viewing volume peaked in {peak_q['quarter']} with {peak_q['viewings']} logged watches ({peak_q['totalHours']} hrs).{era_clause}"
+            f"Viewing volume peaked in {peak_q['quarter']} with {peak_q['viewings']} logged watches{rt_bit}.{era_clause}"
         )
     else:
         timeline_ins = "Quarterly viewing volume and life era comparisons populate once log dates are parsed."
@@ -296,13 +306,19 @@ def build_dynamic_insights(payload: dict) -> dict[str, str]:
         recent_pct = round((recent_n / len(with_lag)) * 100, 1)
         median_age = int(round(float(np.median([v["recencyLagYears"] for v in with_lag]))))
         peak_u = max(release_eras, key=lambda x: x["uniqueFilms"]) if release_eras else None
-        peak_h = max(release_eras, key=lambda x: x["cumulativeHours"]) if release_eras else None
+        peak_h = max(release_eras, key=lambda x: x["cumulativeMinutes"]) if release_eras else None
         era_txt = ""
         if peak_u and peak_h:
             if peak_u["era"] == peak_h["era"]:
-                era_txt = f" The {peak_u['era']} lead both unique titles ({peak_u['uniqueFilms']}) and total watch time ({peak_h['cumulativeHours']} hrs)."
+                era_txt = (
+                    f" The {peak_u['era']} lead both unique titles ({peak_u['uniqueFilms']}) "
+                    f"and total watch time ({fmt_dhm(peak_h['cumulativeMinutes'])})."
+                )
             else:
-                era_txt = f" The {peak_u['era']} lead unique titles ({peak_u['uniqueFilms']}), while the {peak_h['era']} drive the most watch time ({peak_h['cumulativeHours']} hrs)."
+                era_txt = (
+                    f" The {peak_u['era']} lead unique titles ({peak_u['uniqueFilms']}), "
+                    f"while the {peak_h['era']} drive the most watch time ({fmt_dhm(peak_h['cumulativeMinutes'])})."
+                )
         recency_ins = f"Only {recent_pct}% of viewings occur within 2 years of release, with a median film age of {median_age} years.{era_txt}"
     else:
         recency_ins = "Recency lag and release decade splits update automatically once IMDb release years are joined."
@@ -342,7 +358,7 @@ def build_dynamic_insights(payload: dict) -> dict[str, str]:
         top10_views = sum(item["views"] for item in rewatched[:10])
         top10_share = round((top10_views / max(k["totalViewings"], 1)) * 100, 1)
         yr_lbl = f" ({top1['releaseYear']})" if top1.get("releaseYear") else ""
-        rt_lbl = f", totaling {fmt_hours(top1.get('totalMinutes'))}" if top1.get("totalMinutes") else ""
+        rt_lbl = f", totaling {fmt_dhm(top1.get('totalMinutes'))}" if top1.get("totalMinutes") else ""
         rewatches_ins = (
             f"{top1['title']}{yr_lbl} is your most watched film at {top1['views']} viewings{rt_lbl}. "
             f"Your top 10 titles alone account for {top10_share}% of all logged watches."
@@ -387,6 +403,7 @@ def build_payload(
     tmdb_token: str = "",
     cached_posters: dict[str, str] | None = None,
     cached_profiles: dict[str, str] | None = None,
+    mock_imdb: tuple[dict, dict, dict] | None = None,
 ) -> dict:
     cached_posters = cached_posters or {}
     cached_profiles = cached_profiles or {}
@@ -403,7 +420,9 @@ def build_payload(
     ratings_map: dict[str, dict] = {}
     credits_map: dict[str, dict[str, list[dict]]] = {}
 
-    if use_imdb:
+    if mock_imdb is not None:
+        basics_map, ratings_map, credits_map = mock_imdb
+    elif use_imdb:
         basics_gz = download_gz_bytes(DATASETS["title_basics"])
         ratings_gz = download_gz_bytes(DATASETS["title_ratings"])
         principals_gz = download_gz_bytes(DATASETS["title_principals"])
@@ -471,7 +490,6 @@ def build_payload(
     prev_view = same_tc_views[-2] if len(same_tc_views) >= 2 else None
 
     # Annual sparklines
-    annual_map: dict[int, dict] = {}
     all_years = list(range(int(log_df["watch_year"].min()), int(log_df["watch_year"].max()) + 1))
     seen_so_far: set[str] = set()
     by_year = defaultdict(list)
@@ -494,11 +512,12 @@ def build_payload(
                 "firstWatches": firsts,
                 "cumulativeUnique": len(seen_so_far),
                 "rewatchPct": round((rewatches / n_v) * 100, 1) if n_v else 0.0,
+                "totalMinutes": round(mins, 1),
                 "totalHours": round(mins / 60.0, 1),
             }
         )
 
-    # Continuous quarterly timeline from min date to max date
+    # Continuous quarterly timeline
     min_dt = log_df["watch_dt"].min()
     max_dt = log_df["watch_dt"].max()
     q_range = pd.period_range(start=min_dt.to_period("Q"), end=max_dt.to_period("Q"), freq="Q")
@@ -527,6 +546,7 @@ def build_payload(
                 "endDate": q_end,
                 "midDate": q_mid,
                 "viewings": n_v,
+                "totalMinutes": round(mins, 1),
                 "totalHours": round(mins / 60.0, 1),
                 "firstWatches": firsts,
                 "rewatchPct": round((rewatches / n_v) * 100, 1) if n_v else 0.0,
@@ -559,6 +579,7 @@ def build_payload(
                 "color": era["color"],
                 "viewings": n_v,
                 "uniqueFilms": u_f,
+                "totalMinutes": round(mins, 1),
                 "totalHours": round(mins / 60.0, 1),
                 "avgPerMonth": round(n_v / months, 1),
                 "rewatchPct": round((rew_n / n_v) * 100, 1) if n_v else 0.0,
@@ -577,7 +598,7 @@ def build_payload(
             for j in range(i + 1, len(gs)):
                 co_counts[(gs[i], gs[j])] += 1
 
-    # Cast & crew aggregations (keyed by nconst so headshots match accurately)
+    # Cast & crew aggregations + top films per person
     role_counters: dict[str, Counter] = {
         "actors": Counter(),
         "directors": Counter(),
@@ -590,19 +611,20 @@ def build_payload(
         "writers": {},
         "producers": {},
     }
-    role_unique_titles: dict[str, dict[str, set[str]]] = {
-        "actors": defaultdict(set),
-        "directors": defaultdict(set),
-        "writers": defaultdict(set),
-        "producers": defaultdict(set),
+    role_film_views: dict[str, dict[str, Counter]] = {
+        "actors": defaultdict(Counter),
+        "directors": defaultdict(Counter),
+        "writers": defaultdict(Counter),
+        "producers": defaultdict(Counter),
     }
     for v in full_viewings:
+        tc = v["imdbId"]
         for role in role_counters:
             for person in v.get(role, []):
                 nm = person["nconst"]
                 role_counters[role][nm] += 1
                 role_names[role][nm] = person["name"]
-                role_unique_titles[role][nm].add(v["imdbId"])
+                role_film_views[role][nm][tc] += 1
 
     credits_out = {}
     for role, counter in role_counters.items():
@@ -614,13 +636,29 @@ def build_payload(
                 if profile_url:
                     cached_profiles[nm] = profile_url
                 time.sleep(0.05)
+
+            film_counts = role_film_views[role][nm]
+            sorted_films = sorted(
+                film_counts.items(),
+                key=lambda kv: (-kv[1], canonical_title.get(kv[0], kv[0])),
+            )
+            top_films = [
+                {
+                    "imdbId": ftc,
+                    "title": canonical_title.get(ftc, ftc),
+                    "releaseYear": basics_map.get(ftc, {}).get("releaseYear"),
+                    "views": fcnt,
+                }
+                for ftc, fcnt in sorted_films[:6]
+            ]
             top_list.append(
                 {
                     "nconst": nm,
                     "name": role_names[role][nm],
                     "viewings": cnt,
-                    "uniqueFilms": len(role_unique_titles[role][nm]),
+                    "uniqueFilms": len(film_counts),
                     "profileUrl": profile_url,
+                    "topFilms": top_films,
                 }
             )
         credits_out[role] = top_list
@@ -691,6 +729,7 @@ def build_payload(
     season_matrix = []
     for m in month_order:
         for i, d in enumerate(dow_order):
+            cell_mins = md_mins.get((m, d), 0.0)
             season_matrix.append(
                 {
                     "month": m,
@@ -699,7 +738,8 @@ def build_payload(
                     "day": d,
                     "dayShort": dow_short[i],
                     "viewings": md_counts.get((m, d), 0),
-                    "totalHours": round(md_mins.get((m, d), 0.0) / 60.0, 1),
+                    "totalMinutes": round(cell_mins, 1),
+                    "totalHours": round(cell_mins / 60.0, 1),
                 }
             )
 
@@ -728,6 +768,7 @@ def build_payload(
         {
             "era": dec,
             "uniqueFilms": len(era_unique[dec]),
+            "cumulativeMinutes": round(era_minutes[dec], 1),
             "cumulativeHours": round(era_minutes[dec] / 60.0, 1),
         }
         for dec in sorted(era_unique.keys())
@@ -753,6 +794,7 @@ def build_payload(
         {
             "watchYear": yr,
             "avgRuntimeMinutes": round(float(np.mean(vals)), 1),
+            "totalMinutes": round(float(np.sum(vals)), 1),
             "totalHours": round(float(np.sum(vals)) / 60.0, 1),
         }
         for yr, vals in sorted(rt_by_yr.items())
@@ -803,7 +845,7 @@ def build_payload(
                 "start": log_df["watch_date"].min(),
                 "end": log_df["watch_date"].max(),
             },
-            "imdbDatasetsIncluded": bool(use_imdb),
+            "imdbDatasetsIncluded": bool(use_imdb or mock_imdb is not None),
             "tmdbMediaIncluded": bool(tmdb_token and (latest_poster or any(i.get("posterUrl") for i in top_rewatched))),
         },
         "kpis": {

@@ -1,5 +1,6 @@
 const DATA_TIMEOUT_MS = 20000;
-const CACHE_KEY = "mmdb_payload_v3";
+const CACHE_KEY = "mmdb_payload_v4";
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function createSvgEl(tag, attrs = {}, parent = null) {
   const ns = "http://www.w3.org/2000/svg";
@@ -21,13 +22,53 @@ function formatNumber(n, decimals = 0) {
   });
 }
 
-function formatHoursFromMinutes(mins) {
-  if (mins === null || mins === undefined || !Number.isFinite(Number(mins))) return "--";
-  const totalMins = Math.round(Number(mins));
-  const hrs = Math.floor(totalMins / 60);
-  const rem = totalMins % 60;
-  if (hrs === 0) return `${rem}m`;
-  return `${hrs}h ${String(rem).padStart(2, "0")}m`;
+function formatDisplayDate(isoStr) {
+  if (!isoStr || typeof isoStr !== "string") return "--";
+  const parts = isoStr.trim().split("-");
+  if (parts.length !== 3) return isoStr;
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d) || m < 1 || m > 12) {
+    return isoStr;
+  }
+  const dd = String(d).padStart(2, "0");
+  return `${MONTHS_SHORT[m - 1]} ${dd}, ${y}`;
+}
+
+function formatDurationDHM(totalMinutes, style = "compact") {
+  if (totalMinutes === null || totalMinutes === undefined || !Number.isFinite(Number(totalMinutes))) return "--";
+  const totalM = Math.max(0, Math.round(Number(totalMinutes)));
+  const days = Math.floor(totalM / 1440);
+  const hrs = Math.floor((totalM % 1440) / 60);
+  const mins = totalM % 60;
+
+  if (style === "long") {
+    const dLbl = days === 1 ? "day" : "days";
+    const hLbl = hrs === 1 ? "hr" : "hrs";
+    const mLbl = mins === 1 ? "min" : "mins";
+    if (days > 0) {
+      return `${formatNumber(days)} ${dLbl}, ${hrs} ${hLbl}, ${mins} ${mLbl}`;
+    }
+    return `${hrs} ${hLbl}, ${mins} ${mLbl}`;
+  }
+
+  if (style === "always-days") {
+    return `${formatNumber(days)}d ${hrs}h ${String(mins).padStart(2, "0")}m`;
+  }
+
+  if (days > 0) {
+    return `${formatNumber(days)}d ${hrs}h ${String(mins).padStart(2, "0")}m`;
+  }
+  if (hrs > 0) {
+    return `${hrs}h ${String(mins).padStart(2, "0")}m`;
+  }
+  return `${mins}m`;
+}
+
+function imdbTitleUrl(imdbId) {
+  if (!imdbId) return "https://www.imdb.com/";
+  return `https://www.imdb.com/title/${encodeURIComponent(String(imdbId).trim())}/`;
 }
 
 function ordinalSuffix(n) {
@@ -58,17 +99,32 @@ function showEmptyNote(box, message) {
   box.appendChild(div);
 }
 
-/* Shared Interactive Tooltip */
+/* Shared Interactive Tooltip (Hover + Mobile Tap-to-Pin with Close Button) */
 const tooltipEl = document.getElementById("mmdbTooltip");
+let tooltipPinned = false;
 
-function showTooltip(evt, title, rows) {
+function buildTooltipContent(title, rows, extraSection) {
   tooltipEl.innerHTML = "";
-  if (title) {
-    const t = document.createElement("div");
-    t.className = "tt-title";
-    t.textContent = title;
-    tooltipEl.appendChild(t);
-  }
+  const headerRow = document.createElement("div");
+  headerRow.className = "tt-header-row";
+
+  const t = document.createElement("div");
+  t.className = "tt-title";
+  t.textContent = title || "";
+  headerRow.appendChild(t);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "tt-close-btn";
+  closeBtn.textContent = "X";
+  closeBtn.setAttribute("aria-label", "Close tooltip");
+  closeBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    hideTooltip(true);
+  });
+  headerRow.appendChild(closeBtn);
+  tooltipEl.appendChild(headerRow);
+
   (rows || []).forEach(([k, v]) => {
     const r = document.createElement("div");
     r.className = "tt-row";
@@ -82,6 +138,46 @@ function showTooltip(evt, title, rows) {
     r.appendChild(vEl);
     tooltipEl.appendChild(r);
   });
+
+  if (extraSection && extraSection.items && extraSection.items.length) {
+    const div = document.createElement("div");
+    div.className = "tt-divider";
+    tooltipEl.appendChild(div);
+
+    if (extraSection.heading) {
+      const sh = document.createElement("div");
+      sh.className = "tt-subhead";
+      sh.textContent = extraSection.heading;
+      tooltipEl.appendChild(sh);
+    }
+
+    extraSection.items.forEach(([leftText, rightText]) => {
+      const r = document.createElement("div");
+      r.className = "tt-row";
+      const lEl = document.createElement("span");
+      lEl.className = "tt-film-name";
+      lEl.textContent = leftText;
+      const rEl = document.createElement("span");
+      rEl.className = "tt-v";
+      rEl.textContent = rightText;
+      r.appendChild(lEl);
+      r.appendChild(rEl);
+      tooltipEl.appendChild(r);
+    });
+
+    if (extraSection.footnote) {
+      const fn = document.createElement("div");
+      fn.className = "tt-footnote";
+      fn.textContent = extraSection.footnote;
+      tooltipEl.appendChild(fn);
+    }
+  }
+}
+
+function showTooltip(evt, title, rows, extraSection = null, pin = false) {
+  buildTooltipContent(title, rows, extraSection);
+  tooltipPinned = Boolean(pin);
+  tooltipEl.classList.toggle("pinned", tooltipPinned);
   tooltipEl.classList.add("visible");
   tooltipEl.setAttribute("aria-hidden", "false");
   positionTooltip(evt);
@@ -91,28 +187,47 @@ function positionTooltip(evt) {
   if (!evt) return;
   const pad = 14;
   const rect = tooltipEl.getBoundingClientRect();
-  let x = evt.clientX + pad;
-  let y = evt.clientY + pad;
+  const clientX = evt.clientX ?? (evt.touches && evt.touches[0] ? evt.touches[0].clientX : window.innerWidth / 2);
+  const clientY = evt.clientY ?? (evt.touches && evt.touches[0] ? evt.touches[0].clientY : window.innerHeight / 2);
+  let x = clientX + pad;
+  let y = clientY + pad;
   if (x + rect.width > window.innerWidth - 10) {
-    x = evt.clientX - rect.width - pad;
+    x = clientX - rect.width - pad;
   }
   if (y + rect.height > window.innerHeight - 10) {
-    y = evt.clientY - rect.height - pad;
+    y = clientY - rect.height - pad;
   }
   tooltipEl.style.left = `${Math.max(8, x)}px`;
   tooltipEl.style.top = `${Math.max(8, y)}px`;
 }
 
-function hideTooltip() {
-  tooltipEl.classList.remove("visible");
+function hideTooltip(force = false) {
+  if (tooltipPinned && !force) return;
+  tooltipPinned = false;
+  tooltipEl.classList.remove("visible", "pinned");
   tooltipEl.setAttribute("aria-hidden", "true");
 }
 
-function bindTooltip(el, title, rows) {
-  el.addEventListener("mouseenter", (e) => showTooltip(e, title, rows));
-  el.addEventListener("mousemove", positionTooltip);
-  el.addEventListener("mouseleave", hideTooltip);
+function bindTooltip(el, title, rows, extraSection = null, allowClickPin = true) {
+  el.addEventListener("mouseenter", (e) => {
+    if (!tooltipPinned) showTooltip(e, title, rows, extraSection, false);
+  });
+  el.addEventListener("mousemove", (e) => {
+    if (!tooltipPinned) positionTooltip(e);
+  });
+  el.addEventListener("mouseleave", () => hideTooltip(false));
+  if (allowClickPin) {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showTooltip(e, title, rows, extraSection, true);
+    });
+  }
 }
+
+document.addEventListener("click", () => hideTooltip(true));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") hideTooltip(true);
+});
 
 /* Data Loader */
 async function loadPayload() {
@@ -148,7 +263,7 @@ async function loadPayload() {
 }
 
 /* 1. KPI Sparklines */
-function renderSparkline(containerId, series, valueKey, unitLabel, isPct = false) {
+function renderSparkline(containerId, series, valueKey, unitLabel, mode = "count") {
   const box = document.getElementById(containerId);
   box.innerHTML = "";
   if (!series || series.length < 2) return;
@@ -200,14 +315,22 @@ function renderSparkline(containerId, series, valueKey, unitLabel, isPct = false
       },
       svg
     );
-    const valStr = isPct ? `${p.v}%` : `${formatNumber(p.v, valueKey === "totalHours" ? 1 : 0)} ${unitLabel}`;
+    let valStr;
+    if (mode === "pct") {
+      valStr = `${p.v}%`;
+    } else if (mode === "dhm") {
+      const mins = p.d.totalMinutes ?? p.v * 60;
+      valStr = formatDurationDHM(mins, "long");
+    } else {
+      valStr = `${formatNumber(p.v)} ${unitLabel}`;
+    }
     bindTooltip(dot, `Year ${p.d.year}`, [[unitLabel, valStr]]);
     dot.addEventListener("mouseenter", () => dot.setAttribute("opacity", "1"));
     dot.addEventListener("mouseleave", () => dot.setAttribute("opacity", isPeak || isEnd ? "1" : "0.01"));
   });
 }
 
-/* 2. Most Recent Watch with Poster */
+/* 2. Most Recent Watch with Poster & IMDb Link */
 function renderPosterElement(container, posterUrl, title, releaseYear) {
   container.innerHTML = "";
   if (posterUrl) {
@@ -240,11 +363,17 @@ function renderPosterFallback(container, releaseYear) {
 }
 
 function renderRecentWatch(recent) {
-  renderPosterElement(document.getElementById("recentPosterWrap"), recent.posterUrl, recent.title, recent.releaseYear);
-  const titleText = recent.releaseYear ? `${recent.title} (${recent.releaseYear})` : recent.title || "--";
-  document.getElementById("recentTitle").textContent = titleText;
+  const url = imdbTitleUrl(recent.imdbId);
+  const posterLink = document.getElementById("recentPosterWrap");
+  posterLink.href = url;
+  renderPosterElement(posterLink, recent.posterUrl, recent.title, recent.releaseYear);
 
-  const parts = [`Watched ${recent.watchDate || "--"}`];
+  const titleText = recent.releaseYear ? `${recent.title} (${recent.releaseYear})` : recent.title || "--";
+  const titleLink = document.getElementById("recentTitle");
+  titleLink.textContent = titleText;
+  titleLink.href = url;
+
+  const parts = [`Watched ${formatDisplayDate(recent.watchDate)}`];
   if (recent.imdbRating !== null && recent.imdbRating !== undefined) parts.push(`IMDb ${recent.imdbRating}/10`);
   if (recent.runtimeMinutes) parts.push(`${Math.round(recent.runtimeMinutes)} min`);
   if (recent.genres && recent.genres.length) parts.push(recent.genres.join(", "));
@@ -264,15 +393,25 @@ function renderRecentWatch(recent) {
   if (recent.totalFilmMinutes) {
     const pRt = document.createElement("span");
     pRt.className = "pill pill-muted";
-    pRt.textContent = `Total time on this film: ${formatHoursFromMinutes(recent.totalFilmMinutes)}`;
+    pRt.textContent = `Total time on this film: ${formatDurationDHM(recent.totalFilmMinutes, "long")}`;
     pills.appendChild(pRt);
   }
 
   if (recent.daysSincePrevWatch !== null && recent.daysSincePrevWatch !== undefined) {
     const p2 = document.createElement("span");
     p2.className = "pill pill-muted";
-    p2.textContent = `${formatNumber(recent.daysSincePrevWatch)} days since prior watch (${recent.prevWatchDate})`;
+    p2.textContent = `${formatNumber(recent.daysSincePrevWatch)} days since prior watch (${formatDisplayDate(recent.prevWatchDate)})`;
     pills.appendChild(p2);
+  }
+
+  if (recent.imdbId) {
+    const imdbPill = document.createElement("a");
+    imdbPill.className = "pill pill-imdb-link";
+    imdbPill.href = url;
+    imdbPill.target = "_blank";
+    imdbPill.rel = "noopener noreferrer";
+    imdbPill.textContent = "Open on IMDb ↗";
+    pills.appendChild(imdbPill);
   }
 }
 
@@ -293,10 +432,10 @@ function renderTimelineAndGantt(timeline, lifeEras, metricKey) {
   }
 
   const metricMeta = {
-    viewings: { label: "Viewings per Quarter", unit: "viewings", decimals: 0 },
-    totalHours: { label: "Watch Hours per Quarter", unit: "hrs", decimals: 1 },
-    rewatchPct: { label: "Rewatch Rate per Quarter (%)", unit: "%", decimals: 1 },
-    firstWatches: { label: "First-Time Watches per Quarter", unit: "first watches", decimals: 0 },
+    viewings: { label: "Viewings per Quarter" },
+    totalHours: { label: "Watch Time per Quarter" },
+    rewatchPct: { label: "Rewatch Rate per Quarter (%)" },
+    firstWatches: { label: "First-Time Watches per Quarter" },
   }[metricKey];
 
   const minMs = parseDateMs(timeline[0].startDate);
@@ -304,12 +443,11 @@ function renderTimelineAndGantt(timeline, lifeEras, metricKey) {
   const timeSpan = Math.max(maxMs - minMs, 1);
 
   const width = 1100;
-  const padL = 54;
+  const padL = 56;
   const padR = 24;
   const plotW = width - padL - padR;
   const xDate = (ms) => padL + ((ms - minMs) / timeSpan) * plotW;
 
-  // Top Area/Line Chart
   const tHeight = 220;
   const padT = 24;
   const padB = 26;
@@ -325,15 +463,20 @@ function renderTimelineAndGantt(timeline, lifeEras, metricKey) {
     tBox
   );
 
-  // Subtle horizontal reference ticks (0%, 50%, 100%)
   [0, 0.5, 1].forEach((f) => {
     const y = padT + plotH - f * plotH;
     createSvgEl("line", { x1: padL, y1: y, x2: padL + plotW, y2: y, stroke: f === 0 ? "#CBD2D9" : "#ECEFF2" }, svgT);
-    const lbl = metricKey === "rewatchPct" ? `${Math.round(f * maxVal)}%` : formatNumber(Math.round(f * maxVal));
+    let lbl;
+    if (metricKey === "rewatchPct") {
+      lbl = `${Math.round(f * maxVal)}%`;
+    } else if (metricKey === "totalHours") {
+      lbl = `${(f * maxVal / 24).toFixed(1)}d`;
+    } else {
+      lbl = formatNumber(Math.round(f * maxVal));
+    }
     createSvgEl("text", { x: padL - 8, y: y + 4, "text-anchor": "end", fill: "#6E7781", "font-size": 11 }, svgT).textContent = lbl;
   });
 
-  // Year ticks along X-axis
   const startYr = new Date(minMs).getUTCFullYear();
   const endYr = new Date(maxMs).getUTCFullYear();
   for (let yr = startYr; yr <= endYr; yr += 2) {
@@ -372,9 +515,10 @@ function renderTimelineAndGantt(timeline, lifeEras, metricKey) {
       },
       svgT
     );
+    const qMins = p.d.totalMinutes ?? p.d.totalHours * 60;
     const rows = [
       ["Viewings", formatNumber(p.d.viewings)],
-      ["Total Runtime", `${formatNumber(p.d.totalHours, 1)} hrs`],
+      ["Total Watch Time", qMins > 0 ? formatDurationDHM(qMins, "compact") : "--"],
       ["First Watches", formatNumber(p.d.firstWatches)],
       ["Rewatch Rate", `${p.d.rewatchPct}%`],
     ];
@@ -382,7 +526,6 @@ function renderTimelineAndGantt(timeline, lifeEras, metricKey) {
     bindTooltip(dot, `${p.d.quarter} (${metricMeta.label})`, rows);
   });
 
-  // Synchronized Life Eras Gantt Chart
   if (!lifeEras || !lifeEras.length) return;
   const maxTrack = Math.max(...lifeEras.map((e) => Number(e.track) || 0), 0);
   const trackH = 30;
@@ -427,11 +570,12 @@ function renderTimelineAndGantt(timeline, lifeEras, metricKey) {
       }, grp).textContent = era.label;
     }
 
+    const eraMins = era.totalMinutes ?? era.totalHours * 60;
     const rows = [
-      ["Period", `${era.start} to ${era.end}`],
+      ["Period", `${formatDisplayDate(era.start)} to ${formatDisplayDate(era.end)}`],
       ["Viewings", formatNumber(era.viewings)],
       ["Pace", `${era.avgPerMonth} films / mo`],
-      ["Watch Time", `${formatNumber(era.totalHours, 1)} hrs`],
+      ["Watch Time", eraMins > 0 ? formatDurationDHM(eraMins, "compact") : "--"],
       ["Rewatch Rate", `${era.rewatchPct}%`],
     ];
     if (era.topMovie) rows.push(["Most Watched", era.topMovie]);
@@ -534,7 +678,6 @@ function renderGenreMatrix(containerId, genreData) {
     }
   });
 
-  // Render strictly lower triangle (r > c) to avoid duplicate mirror cells
   for (let r = 1; r < topGenres.length; r++) {
     for (let c = 0; c < r; c++) {
       const rowG = topGenres[r];
@@ -607,7 +750,6 @@ function renderRecencyScatter(containerId, viewings) {
   createSvgEl("line", { x1: pad.left, y1: pad.top + plotH, x2: pad.left + plotW, y2: pad.top + plotH, stroke: "#CBD2D9" }, svg);
   createSvgEl("line", { x1: pad.left, y1: pad.top, x2: pad.left, y2: pad.top + plotH, stroke: "#CBD2D9" }, svg);
 
-  // Diagonal same-year line (y = x) within watch year bounds
   const diagStart = Math.max(minRel, minWat);
   const diagEnd = Math.min(maxRel, maxWat);
   if (diagEnd > diagStart) {
@@ -646,7 +788,7 @@ function renderRecencyScatter(containerId, viewings) {
       svg
     );
     bindTooltip(dot, `${p.title} (${p.releaseYear})`, [
-      ["Watched", p.watchDate],
+      ["Watched", formatDisplayDate(p.watchDate)],
       ["Film Age at Watch", `${lag} yrs`],
       ["IMDb Rating", p.imdbRating ?? "--"],
     ]);
@@ -680,7 +822,7 @@ function renderEraColumns(containerId, eras, metricKey) {
   );
 
   createSvgEl("text", { x: 0, y: 14, fill: "#6E7781", "font-size": 12, "font-weight": 700 }, svg).textContent =
-    isHours ? "Cumulative Watch Hours by Release Decade (Gold = Peak)" : "Unique Films by Release Decade (Gold = Peak)";
+    isHours ? "Cumulative Watch Time by Release Decade (Days, Gold = Peak)" : "Unique Films by Release Decade (Gold = Peak)";
 
   createSvgEl("line", { x1: pad.left, y1: pad.top + plotH, x2: pad.left + plotW, y2: pad.top + plotH, stroke: "#CBD2D9" }, svg);
 
@@ -690,6 +832,7 @@ function renderEraColumns(containerId, eras, metricKey) {
     const bh = Math.max(2, (val / maxVal) * plotH);
     const x = pad.left + i * slotW + (slotW - barW) / 2;
     const y = pad.top + plotH - bh;
+    const eraMins = d.cumulativeMinutes ?? d.cumulativeHours * 60;
 
     const grp = createSvgEl("g", { style: "cursor: pointer;" }, svg);
     createSvgEl("rect", {
@@ -701,6 +844,10 @@ function renderEraColumns(containerId, eras, metricKey) {
       fill: isPeak ? "#F5C518" : "#6E7781",
     }, grp);
 
+    const lblText = isHours
+      ? (eraMins >= 1440 ? `${(eraMins / 1440).toFixed(1)}d` : `${Math.round(eraMins / 60)}h`)
+      : formatNumber(val);
+
     createSvgEl("text", {
       x: x + barW / 2,
       y: y - 5,
@@ -708,7 +855,7 @@ function renderEraColumns(containerId, eras, metricKey) {
       fill: "#1F2328",
       "font-size": 10,
       "font-weight": isPeak ? 900 : 700,
-    }, grp).textContent = isHours ? formatNumber(Math.round(val)) : formatNumber(val);
+    }, grp).textContent = lblText;
 
     createSvgEl("text", {
       x: x + barW / 2,
@@ -720,7 +867,7 @@ function renderEraColumns(containerId, eras, metricKey) {
 
     bindTooltip(grp, `${d.era} Releases`, [
       ["Unique Films", formatNumber(d.uniqueFilms)],
-      ["Cumulative Watch Time", `${formatNumber(d.cumulativeHours, 1)} hrs`],
+      ["Cumulative Watch Time", formatDurationDHM(eraMins, "compact")],
     ]);
   });
 }
@@ -860,7 +1007,6 @@ function renderVoteDepthDonut(containerId, tiers) {
     ]);
     offset += segLen;
 
-    // Legend row on right
     const ly = 56 + idx * 32;
     const lg = createSvgEl("g", { style: "cursor: pointer;" }, svg);
     createSvgEl("rect", { x: 204, y: ly - 9, width: 12, height: 12, rx: 3, fill: col }, lg);
@@ -875,7 +1021,7 @@ function renderVoteDepthDonut(containerId, tiers) {
   createSvgEl("text", { x: cx, y: cy + 15, "text-anchor": "middle", fill: "#6E7781", "font-size": 10 }, svg).textContent = "VIEWINGS";
 }
 
-/* 7. Cast & Crew Portrait Leaderboard */
+/* 7. Cast & Crew Portrait Leaderboard with Top Films Tooltip */
 function renderCreditsGrid(containerId, list, roleLabel) {
   const box = document.getElementById(containerId);
   box.innerHTML = "";
@@ -944,16 +1090,34 @@ function renderCreditsGrid(containerId, list, roleLabel) {
     card.appendChild(av);
     card.appendChild(info);
 
-    bindTooltip(card, p.name, [
-      ["Role", roleLabel],
-      ["Logged Viewings", formatNumber(p.viewings)],
-      ["Unique Films", formatNumber(p.uniqueFilms)],
-    ]);
+    const films = p.topFilms || [];
+    const remaining = Math.max(0, (Number(p.uniqueFilms) || 0) - films.length);
+    const filmSection = films.length
+      ? {
+          heading: "Top Watched Films",
+          items: films.map((f) => [
+            f.releaseYear ? `${f.title} (${f.releaseYear})` : f.title,
+            `${f.views} ${f.views === 1 ? "view" : "views"}`,
+          ]),
+          footnote: remaining > 0 ? `+ ${remaining} more ${remaining === 1 ? "film" : "films"} in log` : null,
+        }
+      : null;
+
+    bindTooltip(
+      card,
+      p.name,
+      [
+        ["Role", roleLabel],
+        ["Logged Viewings", formatNumber(p.viewings)],
+        ["Unique Films", formatNumber(p.uniqueFilms)],
+      ],
+      filmSection
+    );
     box.appendChild(card);
   });
 }
 
-/* 8. Most Watched Movies Poster Gallery */
+/* 8. Most Watched Movies Poster Gallery (Clickable to IMDb) */
 function renderTopRewatchedGallery(containerId, list) {
   const box = document.getElementById(containerId);
   box.innerHTML = "";
@@ -964,8 +1128,12 @@ function renderTopRewatchedGallery(containerId, list) {
   }
 
   slice.forEach((item, idx) => {
-    const card = document.createElement("article");
+    const card = document.createElement("a");
     card.className = "movie-card";
+    card.href = imdbTitleUrl(item.imdbId);
+    card.target = "_blank";
+    card.rel = "noopener noreferrer";
+    card.setAttribute("aria-label", `Open ${item.title} on IMDb`);
 
     const pBox = document.createElement("div");
     pBox.className = "movie-poster-box";
@@ -975,6 +1143,11 @@ function renderTopRewatchedGallery(containerId, list) {
     badge.className = "movie-rank-badge";
     badge.textContent = `#${idx + 1}`;
     pBox.appendChild(badge);
+
+    const imdbTag = document.createElement("span");
+    imdbTag.className = "movie-imdb-tag";
+    imdbTag.textContent = "IMDb ↗";
+    pBox.appendChild(imdbTag);
 
     const body = document.createElement("div");
     body.className = "movie-card-body";
@@ -996,7 +1169,7 @@ function renderTopRewatchedGallery(containerId, list) {
     vPill.textContent = `${item.views} views`;
     const hPill = document.createElement("span");
     hPill.className = "movie-hours-pill";
-    hPill.textContent = item.totalMinutes ? formatHoursFromMinutes(item.totalMinutes) : "--";
+    hPill.textContent = item.totalMinutes ? formatDurationDHM(item.totalMinutes, "compact") : "--";
     metrics.appendChild(vPill);
     metrics.appendChild(hPill);
 
@@ -1006,18 +1179,25 @@ function renderTopRewatchedGallery(containerId, list) {
     card.appendChild(body);
 
     const ttTitle = item.releaseYear ? `${item.title} (${item.releaseYear})` : item.title;
-    bindTooltip(card, ttTitle, [
-      ["Total Views", formatNumber(item.views)],
-      ["Total Runtime Watched", item.totalMinutes ? formatHoursFromMinutes(item.totalMinutes) : "--"],
-      ["Single Runtime", item.runtimeMinutes ? `${Math.round(item.runtimeMinutes)} min` : "--"],
-      ["IMDb Rating", item.imdbRating ?? "--"],
-      ["First / Last Watch", `${item.firstWatched} to ${item.lastWatched}`],
-    ]);
+    bindTooltip(
+      card,
+      ttTitle,
+      [
+        ["Total Views", formatNumber(item.views)],
+        ["Cumulative Watch Time", item.totalMinutes ? formatDurationDHM(item.totalMinutes, "compact") : "--"],
+        ["Single Runtime", item.runtimeMinutes ? `${Math.round(item.runtimeMinutes)} min` : "--"],
+        ["IMDb Rating", item.imdbRating ?? "--"],
+        ["First Watch", formatDisplayDate(item.firstWatched)],
+        ["Last Watch", formatDisplayDate(item.lastWatched)],
+      ],
+      { heading: "Link", items: [["Click card to open IMDb page", "↗"]] },
+      false
+    );
     box.appendChild(card);
   });
 }
 
-/* 9. Seasonality Month x Weekday Heatmap, Runtime Line Chart, Rewatch Latency Strip */
+/* 9. Seasonality Heatmap, Runtime Line, Rewatch Latency Strip */
 function renderSeasonHeatmap(containerId, matrix) {
   const box = document.getElementById(containerId);
   box.innerHTML = "";
@@ -1080,9 +1260,10 @@ function renderSeasonHeatmap(containerId, matrix) {
       "font-weight": 700,
     }, grp).textContent = String(cell.viewings);
 
+    const cellMins = cell.totalMinutes ?? cell.totalHours * 60;
     bindTooltip(grp, `${cell.monthLabel} (${cell.day}s)`, [
       ["Viewings", formatNumber(cell.viewings)],
-      ["Total Runtime", `${formatNumber(cell.totalHours, 1)} hrs`],
+      ["Total Watch Time", cellMins > 0 ? formatDurationDHM(cellMins, "compact") : "--"],
     ]);
   });
 }
@@ -1142,9 +1323,10 @@ function renderRuntimeLine(containerId, rows) {
       { cx, cy, r: isPeak ? 4.8 : 3.2, fill: isPeak ? "#F5C518" : "#1F2328", stroke: "#FFFFFF", "stroke-width": 1.2, style: "cursor: pointer;" },
       svg
     );
+    const yrMins = r.totalMinutes ?? r.totalHours * 60;
     bindTooltip(dot, `Watch Year ${r.watchYear}`, [
       ["Avg Runtime", `${r.avgRuntimeMinutes} mins`],
-      ["Total Hours", `${formatNumber(r.totalHours, 1)} hrs`],
+      ["Total Watch Time", formatDurationDHM(yrMins, "compact")],
     ]);
 
     if (i === 0 || i === rows.length - 1 || i % 3 === 0) {
@@ -1211,7 +1393,7 @@ function renderLatencyStrip(containerId, latency) {
   });
 }
 
-/* 10. Complete Scrollable Viewing Log with Total Runtime Watched */
+/* 10. Complete Scrollable Viewing Log (MMM DD, YYYY + D,H,M + Clickable IMDb Links) */
 function renderViewingLog(viewings) {
   const qMovie = document.getElementById("searchMovie").value.trim().toLowerCase();
   const qGenre = document.getElementById("searchGenre").value.trim().toLowerCase();
@@ -1232,7 +1414,7 @@ function renderViewingLog(viewings) {
   });
 
   const filteredMins = filtered.reduce((sum, v) => sum + (Number.isFinite(Number(v.runtimeMinutes)) ? Number(v.runtimeMinutes) : 0), 0);
-  const rtSummary = filteredMins > 0 ? ` | Filtered Total Runtime Watched: ${formatNumber(filteredMins / 60, 1)} hrs` : "";
+  const rtSummary = filteredMins > 0 ? ` | Filtered Total Watch Time: ${formatDurationDHM(filteredMins, "long")}` : "";
   document.getElementById("logCountLabel").textContent =
     `Showing ${formatNumber(filtered.length)} of ${formatNumber((viewings || []).length)} viewings (newest first)${rtSummary}`;
 
@@ -1242,20 +1424,41 @@ function renderViewingLog(viewings) {
 
   filtered.forEach((v) => {
     const tr = document.createElement("tr");
-    const cells = [
-      v.watchDate,
-      v.title,
-      v.releaseYear ?? "--",
-      (v.genres || []).join(", ") || "--",
-      v.imdbRating !== null && v.imdbRating !== undefined ? String(v.imdbRating) : "--",
-      v.runtimeMinutes !== null && v.runtimeMinutes !== undefined ? `${Math.round(v.runtimeMinutes)}m` : "--",
-      `#${v.viewingNumber} of ${v.totalViewsForTitle || v.viewingNumber}`,
-      v.totalFilmMinutes ? formatHoursFromMinutes(v.totalFilmMinutes) : "--",
+
+    // 0: Date Watched (MMM DD, YYYY)
+    const tdDate = document.createElement("td");
+    tdDate.className = "date-col";
+    tdDate.textContent = formatDisplayDate(v.watchDate);
+    tr.appendChild(tdDate);
+
+    // 1: Film Title (Clickable IMDb link)
+    const tdFilm = document.createElement("td");
+    const link = document.createElement("a");
+    link.className = "imdb-film-link";
+    link.href = imdbTitleUrl(v.imdbId);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = v.title || v.imdbId;
+    const arrow = document.createElement("span");
+    arrow.className = "ext-arrow";
+    arrow.textContent = "↗";
+    link.appendChild(arrow);
+    tdFilm.appendChild(link);
+    tr.appendChild(tdFilm);
+
+    // 2..7: Release, Genres, IMDb, Runtime, Viewing #, Total Runtime Watched
+    const rest = [
+      { val: v.releaseYear ?? "--", cls: "num-col" },
+      { val: (v.genres || []).join(", ") || "--", cls: "" },
+      { val: v.imdbRating !== null && v.imdbRating !== undefined ? String(v.imdbRating) : "--", cls: "num-col" },
+      { val: v.runtimeMinutes !== null && v.runtimeMinutes !== undefined ? `${Math.round(v.runtimeMinutes)}m` : "--", cls: "num-col" },
+      { val: `#${v.viewingNumber} of ${v.totalViewsForTitle || v.viewingNumber}`, cls: "num-col" },
+      { val: v.totalFilmMinutes ? formatDurationDHM(v.totalFilmMinutes, "compact") : "--", cls: "num-col" },
     ];
-    cells.forEach((val, idx) => {
+    rest.forEach((item) => {
       const td = document.createElement("td");
-      if (idx === 2 || idx === 4 || idx === 5 || idx === 6 || idx === 7) td.className = "num-col";
-      td.textContent = String(val);
+      if (item.cls) td.className = item.cls;
+      td.textContent = String(item.val);
       tr.appendChild(td);
     });
     frag.appendChild(tr);
@@ -1309,25 +1512,28 @@ async function init() {
     const payload = await loadPayload();
     const k = payload.kpis;
 
-    document.getElementById("dateRangeLabel").textContent =
-      `${payload.meta?.dateRange?.start || "--"} to ${payload.meta?.dateRange?.end || "--"}`;
+    const startLbl = formatDisplayDate(payload.meta?.dateRange?.start);
+    const endLbl = formatDisplayDate(payload.meta?.dateRange?.end);
+    document.getElementById("dateRangeLabel").textContent = `${startLbl} to ${endLbl}`;
+
     document.getElementById("kpiUnique").textContent = formatNumber(k.uniqueFilms);
     document.getElementById("kpiViewings").textContent = formatNumber(k.totalViewings);
     document.getElementById("kpiRewatch").textContent = `${k.rewatchPct}%`;
 
     if (k.totalMinutes > 0) {
-      document.getElementById("kpiRuntime").textContent = `${formatNumber(k.totalHours, 1)} hrs`;
-      document.getElementById("kpiRuntimeSub").textContent = `${formatNumber(k.totalDays, 1)} days (${formatNumber(Math.round(k.totalMinutes))} mins)`;
+      document.getElementById("kpiRuntime").textContent = formatDurationDHM(k.totalMinutes, "always-days");
+      document.getElementById("kpiRuntimeSub").textContent =
+        `${formatDurationDHM(k.totalMinutes, "long")} (${formatNumber(k.totalHours, 1)} hrs)`;
     } else {
       document.getElementById("kpiRuntime").textContent = "Pending IMDb Sync";
       document.getElementById("kpiRuntimeSub").textContent = "Run GitHub Action to join runtimes";
     }
 
     const sp = payload.sparklines || [];
-    renderSparkline("sparkUnique", sp, "firstWatches", "new films");
-    renderSparkline("sparkViewings", sp, "viewings", "viewings");
-    renderSparkline("sparkRewatch", sp, "rewatchPct", "rewatch rate", true);
-    renderSparkline("sparkRuntime", sp, "totalHours", "hrs");
+    renderSparkline("sparkUnique", sp, "firstWatches", "new films", "count");
+    renderSparkline("sparkViewings", sp, "viewings", "viewings", "count");
+    renderSparkline("sparkRewatch", sp, "rewatchPct", "rewatch rate", "pct");
+    renderSparkline("sparkRuntime", sp, "totalHours", "Watch Time", "dhm");
 
     renderRecentWatch(payload.mostRecentWatch || {});
 

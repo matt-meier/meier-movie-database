@@ -1,12 +1,11 @@
-# Meier Movie Database (MMDb) v2
+# Meier Movie Database (MMDb) v3
 
 Self-contained static data app hosted on GitHub Pages and embedded in Tableau Public, with automated daily IMDb syncing and optional TMDb movie posters and cast/crew portraits.
 
-## GitHub Secrets Setup
+## What Is New in v3
 
-1. `SHEET_CSV_URL` (Required): Published CSV URL of your Google Sheet film log tab.
-2. `TMDB_API_KEY` (Optional, free for personal use): Either your TMDb v3 API Key or v4 Read Access Token from https://www.themoviedb.org/settings/api. When set, `scripts/build_data.py` automatically resolves posters for your Most Recent Watch and Top 15 Most Watched Movies plus headshots for your Top 12 Actors, Directors, Writers, and Producers using their IMDb IDs (`tt...` / `nm...`) and caches them inside `data.json`.
-
-## Life Eras Customization
-
-Edit the `LIFE_ERAS` list at the top of `scripts/build_data.py` anytime. Setting `"end": "Present"` automatically extends an era to your latest logged viewing date.
+- Cumulative watch time formatted as Days, Hours, Minutes across KPIs, charts, tooltips, insights, and the viewing log.
+- All watch dates formatted as `MMM DD, YYYY` (for example, `Nov 23, 2026`).
+- Cast and crew tooltips list each contributor's top watched films with viewing counts.
+- Individual films in Most Recent Watch, Most Watched Movies, and the Complete Viewing Log link directly to their IMDb title pages (`https://www.imdb.com/title/<id>/`) with clear callouts.
+- Mobile-friendly tap-to-pin tooltips with a built-in close (`X`) button.
