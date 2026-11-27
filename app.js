@@ -1,5 +1,5 @@
 const DATA_TIMEOUT_MS = 20000;
-const CACHE_KEY = "mmdb_payload_v4";
+const CACHE_KEY = "mmdb_payload_v5";
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function createSvgEl(tag, attrs = {}, parent = null) {
@@ -97,6 +97,23 @@ function showEmptyNote(box, message) {
   div.className = "empty-note";
   div.textContent = message;
   box.appendChild(div);
+}
+
+function buildTopFilmsSection(topFilms, uniqueFilmsCount, heading = "Top Contributing Films", valueFormatter = null) {
+  const films = topFilms || [];
+  if (!films.length) return null;
+  const remaining = Math.max(0, (Number(uniqueFilmsCount) || 0) - films.length);
+  return {
+    heading,
+    items: films.map((f) => {
+      const label = f.releaseYear ? `${f.title} (${f.releaseYear})` : f.title;
+      const right = valueFormatter
+        ? valueFormatter(f)
+        : `${f.views} ${f.views === 1 ? "view" : "views"}`;
+      return [label, right];
+    }),
+    footnote: remaining > 0 ? `+ ${formatNumber(remaining)} more ${remaining === 1 ? "film" : "films"} in log` : null,
+  };
 }
 
 /* Shared Interactive Tooltip (Hover + Mobile Tap-to-Pin with Close Button) */
@@ -330,7 +347,7 @@ function renderSparkline(containerId, series, valueKey, unitLabel, mode = "count
   });
 }
 
-/* 2. Most Recent Watch with Poster & IMDb Link */
+/* 2. Most Recent Watch with Poster, Brief Description & IMDb Link */
 function renderPosterElement(container, posterUrl, title, releaseYear) {
   container.innerHTML = "";
   if (posterUrl) {
@@ -378,6 +395,15 @@ function renderRecentWatch(recent) {
   if (recent.runtimeMinutes) parts.push(`${Math.round(recent.runtimeMinutes)} min`);
   if (recent.genres && recent.genres.length) parts.push(recent.genres.join(", "));
   document.getElementById("recentMeta").textContent = parts.join("  |  ");
+
+  const overviewEl = document.getElementById("recentOverview");
+  if (recent.overview && String(recent.overview).trim()) {
+    overviewEl.textContent = String(recent.overview).trim();
+    overviewEl.hidden = false;
+  } else {
+    overviewEl.textContent = "";
+    overviewEl.hidden = true;
+  }
 
   const pills = document.getElementById("recentPills");
   pills.innerHTML = "";
@@ -583,7 +609,7 @@ function renderTimelineAndGantt(timeline, lifeEras, metricKey) {
   });
 }
 
-/* 4. Genres: Horizontal Lollipop + Lower-Triangle Co-Occurrence Matrix */
+/* 4. Genres: Horizontal Lollipop + Lower-Triangle Co-Occurrence Matrix (with Top Films) */
 function renderGenreLollipop(containerId, counts) {
   const box = document.getElementById(containerId);
   box.innerHTML = "";
@@ -621,7 +647,13 @@ function renderGenreLollipop(containerId, counts) {
     createSvgEl("circle", { cx: xEnd, cy: y, r: isTop ? 6.5 : 5, fill: accent, stroke: "#FFFFFF", "stroke-width": 1.2 }, grp);
     createSvgEl("text", { x: xEnd + 11, y: y + 4, fill: "#1F2328", "font-size": 12, "font-weight": 700 }, grp).textContent = formatNumber(d.viewings);
 
-    bindTooltip(grp, d.genre, [["Logged Viewings", formatNumber(d.viewings)], ["Rank", `#${i + 1}`]]);
+    const rows = [
+      ["Logged Viewings", formatNumber(d.viewings)],
+      ["Unique Films", formatNumber(d.uniqueFilms)],
+      ["Rank", `#${i + 1}`],
+    ];
+    const filmSection = buildTopFilmsSection(d.topFilms, d.uniqueFilms, "Top Watched Films");
+    bindTooltip(grp, d.genre, rows, filmSection);
   });
 }
 
@@ -638,8 +670,8 @@ function renderGenreMatrix(containerId, genreData) {
   const pairMap = new Map();
   let maxPair = 1;
   pairs.forEach((p) => {
-    pairMap.set(`${p.genreA}|${p.genreB}`, p.viewings);
-    pairMap.set(`${p.genreB}|${p.genreA}`, p.viewings);
+    pairMap.set(`${p.genreA}|${p.genreB}`, p);
+    pairMap.set(`${p.genreB}|${p.genreA}`, p);
     if (p.viewings > maxPair) maxPair = p.viewings;
   });
 
@@ -682,7 +714,8 @@ function renderGenreMatrix(containerId, genreData) {
     for (let c = 0; c < r; c++) {
       const rowG = topGenres[r];
       const colG = topGenres[c];
-      const val = pairMap.get(`${rowG}|${colG}`) || 0;
+      const pairObj = pairMap.get(`${rowG}|${colG}`);
+      const val = pairObj ? pairObj.viewings : 0;
       const x = padL + c * cell;
       const y = padT + r * cell;
       const intensity = val > 0 ? 0.16 + 0.84 * (val / maxPair) : 0.05;
@@ -707,7 +740,15 @@ function renderGenreMatrix(containerId, genreData) {
           "text-anchor": "middle",
         }, grp).textContent = String(val);
       }
-      bindTooltip(grp, `${rowG} + ${colG}`, [["Shared Viewings", formatNumber(val)]]);
+
+      const rows = [["Shared Viewings", formatNumber(val)]];
+      if (pairObj && pairObj.uniqueFilms !== undefined) {
+        rows.push(["Unique Films", formatNumber(pairObj.uniqueFilms)]);
+      }
+      const filmSection = pairObj
+        ? buildTopFilmsSection(pairObj.topFilms, pairObj.uniqueFilms, "Top Overlapping Films")
+        : null;
+      bindTooltip(grp, `${rowG} + ${colG}`, rows, filmSection);
     }
   }
 }
@@ -872,7 +913,7 @@ function renderEraColumns(containerId, eras, metricKey) {
   });
 }
 
-/* 6. IMDb Rating Histogram + Vote Depth Donut */
+/* 6. IMDb Rating Histogram + Vote Depth Donut (with Top Films) */
 function renderRatingHistogram(containerId, bins, viewings) {
   const box = document.getElementById(containerId);
   box.innerHTML = "";
@@ -930,7 +971,15 @@ function renderRatingHistogram(containerId, bins, viewings) {
       "font-size": 10,
     }, grp).textContent = String(b.rating);
 
-    bindTooltip(grp, `IMDb Rating ${b.rating}`, [["Logged Viewings", formatNumber(b.viewings)]]);
+    const rows = [["Logged Viewings", formatNumber(b.viewings)]];
+    if (b.uniqueFilms !== undefined) rows.push(["Unique Films", formatNumber(b.uniqueFilms)]);
+    const filmSection = buildTopFilmsSection(
+      b.topFilms,
+      b.uniqueFilms,
+      "Top Films in This Tier",
+      (f) => `${f.views} ${f.views === 1 ? "view" : "views"}${f.imdbRating ? ` (${f.imdbRating})` : ""}`
+    );
+    bindTooltip(grp, `IMDb Rating ${b.rating}`, rows, filmSection);
   });
 
   if (meanRating !== null) {
@@ -985,6 +1034,13 @@ function renderVoteDepthDonut(containerId, tiers) {
     const segLen = share * circ;
     const col = colors[t.tier] || "#6E7781";
 
+    const rows = [
+      ["Viewings", formatNumber(t.viewings)],
+      ["Share", `${(share * 100).toFixed(1)}%`],
+    ];
+    if (t.uniqueFilms !== undefined) rows.push(["Unique Films", formatNumber(t.uniqueFilms)]);
+    const filmSection = buildTopFilmsSection(t.topFilms, t.uniqueFilms, "Top Films in This Tier");
+
     const arc = createSvgEl(
       "circle",
       {
@@ -1001,10 +1057,7 @@ function renderVoteDepthDonut(containerId, tiers) {
       },
       svg
     );
-    bindTooltip(arc, t.tier, [
-      ["Viewings", formatNumber(t.viewings)],
-      ["Share", `${(share * 100).toFixed(1)}%`],
-    ]);
+    bindTooltip(arc, t.tier, rows, filmSection);
     offset += segLen;
 
     const ly = 56 + idx * 32;
@@ -1013,7 +1066,7 @@ function renderVoteDepthDonut(containerId, tiers) {
     createSvgEl("text", { x: 222, y: ly + 1, fill: "#1F2328", "font-size": 11, "font-weight": 700 }, lg).textContent = t.tier;
     createSvgEl("text", { x: 222, y: ly + 14, fill: "#6E7781", "font-size": 11 }, lg).textContent =
       `${formatNumber(t.viewings)} (${(share * 100).toFixed(1)}%)`;
-    bindTooltip(lg, t.tier, [["Viewings", formatNumber(t.viewings)], ["Share", `${(share * 100).toFixed(1)}%`]]);
+    bindTooltip(lg, t.tier, rows, filmSection);
   });
 
   createSvgEl("text", { x: cx, y: cy - 2, "text-anchor": "middle", fill: "#1F2328", "font-size": 18, "font-weight": 900 }, svg).textContent =
@@ -1090,19 +1143,7 @@ function renderCreditsGrid(containerId, list, roleLabel) {
     card.appendChild(av);
     card.appendChild(info);
 
-    const films = p.topFilms || [];
-    const remaining = Math.max(0, (Number(p.uniqueFilms) || 0) - films.length);
-    const filmSection = films.length
-      ? {
-          heading: "Top Watched Films",
-          items: films.map((f) => [
-            f.releaseYear ? `${f.title} (${f.releaseYear})` : f.title,
-            `${f.views} ${f.views === 1 ? "view" : "views"}`,
-          ]),
-          footnote: remaining > 0 ? `+ ${remaining} more ${remaining === 1 ? "film" : "films"} in log` : null,
-        }
-      : null;
-
+    const filmSection = buildTopFilmsSection(p.topFilms, p.uniqueFilms, "Top Watched Films");
     bindTooltip(
       card,
       p.name,
@@ -1197,7 +1238,7 @@ function renderTopRewatchedGallery(containerId, list) {
   });
 }
 
-/* 9. Seasonality Heatmap, Runtime Line, Rewatch Latency Strip */
+/* 9. Seasonality Heatmap, Runtime Line, Rewatch Latency Strip (All with Top Films Tooltips) */
 function renderSeasonHeatmap(containerId, matrix) {
   const box = document.getElementById(containerId);
   box.innerHTML = "";
@@ -1261,10 +1302,13 @@ function renderSeasonHeatmap(containerId, matrix) {
     }, grp).textContent = String(cell.viewings);
 
     const cellMins = cell.totalMinutes ?? cell.totalHours * 60;
-    bindTooltip(grp, `${cell.monthLabel} (${cell.day}s)`, [
+    const rows = [
       ["Viewings", formatNumber(cell.viewings)],
       ["Total Watch Time", cellMins > 0 ? formatDurationDHM(cellMins, "compact") : "--"],
-    ]);
+    ];
+    if (cell.uniqueFilms !== undefined) rows.push(["Unique Films", formatNumber(cell.uniqueFilms)]);
+    const filmSection = buildTopFilmsSection(cell.topFilms, cell.uniqueFilms, "Top Watched Films");
+    bindTooltip(grp, `${cell.monthLabel} (${cell.day}s)`, rows, filmSection);
   });
 }
 
@@ -1324,10 +1368,18 @@ function renderRuntimeLine(containerId, rows) {
       svg
     );
     const yrMins = r.totalMinutes ?? r.totalHours * 60;
-    bindTooltip(dot, `Watch Year ${r.watchYear}`, [
+    const ttRows = [
       ["Avg Runtime", `${r.avgRuntimeMinutes} mins`],
       ["Total Watch Time", formatDurationDHM(yrMins, "compact")],
-    ]);
+    ];
+    if (r.uniqueFilms !== undefined) ttRows.push(["Unique Films", formatNumber(r.uniqueFilms)]);
+    const filmSection = buildTopFilmsSection(
+      r.topFilms,
+      r.uniqueFilms,
+      `Top Films Watched in ${r.watchYear}`,
+      (f) => `${f.views}x${f.runtimeMinutes ? ` (${f.runtimeMinutes}m)` : ""}`
+    );
+    bindTooltip(dot, `Watch Year ${r.watchYear}`, ttRows, filmSection);
 
     if (i === 0 || i === rows.length - 1 || i % 3 === 0) {
       createSvgEl("text", { x: cx, y: h - 10, "text-anchor": "middle", fill: "#6E7781", "font-size": 10 }, svg).textContent = String(r.watchYear);
@@ -1385,16 +1437,24 @@ function renderLatencyStrip(containerId, latency) {
       "font-size": 10,
     }, grp).textContent = `${formatNumber(b.count)} rewatches`;
 
-    bindTooltip(grp, `Rewatch Gap: ${b.bucket}`, [
+    const ttRows = [
       ["Rewatches", formatNumber(b.count)],
       ["Share of Rewatches", `${(share * 100).toFixed(1)}%`],
-    ]);
+    ];
+    if (b.uniqueFilms !== undefined) ttRows.push(["Unique Films", formatNumber(b.uniqueFilms)]);
+    const filmSection = buildTopFilmsSection(
+      b.topFilms,
+      b.uniqueFilms,
+      "Top Rewatched Films in Gap",
+      (f) => `${f.views} ${f.views === 1 ? "rewatch" : "rewatches"}`
+    );
+    bindTooltip(grp, `Rewatch Gap: ${b.bucket}`, ttRows, filmSection);
     curX += segW + 4;
   });
 }
 
-/* 10. Complete Scrollable Viewing Log (MMM DD, YYYY + D,H,M + Clickable IMDb Links) */
-function renderViewingLog(viewings) {
+/* 10. Complete Scrollable Viewing Log (Point-in-Time Cumulative Runtime + Inline Bar Chart) */
+function renderViewingLog(viewings, maxCumMins) {
   const qMovie = document.getElementById("searchMovie").value.trim().toLowerCase();
   const qGenre = document.getElementById("searchGenre").value.trim().toLowerCase();
   const qYear = document.getElementById("searchYear").value.trim().toLowerCase();
@@ -1417,6 +1477,12 @@ function renderViewingLog(viewings) {
   const rtSummary = filteredMins > 0 ? ` | Filtered Total Watch Time: ${formatDurationDHM(filteredMins, "long")}` : "";
   document.getElementById("logCountLabel").textContent =
     `Showing ${formatNumber(filtered.length)} of ${formatNumber((viewings || []).length)} viewings (newest first)${rtSummary}`;
+
+  const scaleMax = Math.max(
+    Number(maxCumMins) || 0,
+    ...((viewings || []).map((v) => Number(v.cumulativeFilmMinutes) || 0)),
+    1
+  );
 
   const tbody = document.getElementById("viewingLogBody");
   tbody.innerHTML = "";
@@ -1446,14 +1512,13 @@ function renderViewingLog(viewings) {
     tdFilm.appendChild(link);
     tr.appendChild(tdFilm);
 
-    // 2..7: Release, Genres, IMDb, Runtime, Viewing #, Total Runtime Watched
+    // 2..6: Release, Genres, IMDb, Runtime, Viewing #
     const rest = [
       { val: v.releaseYear ?? "--", cls: "num-col" },
       { val: (v.genres || []).join(", ") || "--", cls: "" },
       { val: v.imdbRating !== null && v.imdbRating !== undefined ? String(v.imdbRating) : "--", cls: "num-col" },
       { val: v.runtimeMinutes !== null && v.runtimeMinutes !== undefined ? `${Math.round(v.runtimeMinutes)}m` : "--", cls: "num-col" },
       { val: `#${v.viewingNumber} of ${v.totalViewsForTitle || v.viewingNumber}`, cls: "num-col" },
-      { val: v.totalFilmMinutes ? formatDurationDHM(v.totalFilmMinutes, "compact") : "--", cls: "num-col" },
     ];
     rest.forEach((item) => {
       const td = document.createElement("td");
@@ -1461,6 +1526,44 @@ function renderViewingLog(viewings) {
       td.textContent = String(item.val);
       tr.appendChild(td);
     });
+
+    // 7: Cumulative Total Runtime Watched AT THIS VIEWING + Inline Bar
+    const tdBar = document.createElement("td");
+    tdBar.className = "num-col runtime-bar-cell";
+    const cumMins = v.cumulativeFilmMinutes;
+    if (cumMins !== null && cumMins !== undefined && Number.isFinite(Number(cumMins))) {
+      const pct = Math.min(100, Math.max(2, (Number(cumMins) / scaleMax) * 100));
+      const wrap = document.createElement("div");
+      wrap.className = "runtime-bar-wrap";
+
+      const lbl = document.createElement("span");
+      lbl.className = "runtime-bar-label";
+      lbl.textContent = formatDurationDHM(cumMins, "compact");
+
+      const track = document.createElement("div");
+      track.className = "runtime-bar-track";
+      const fill = document.createElement("div");
+      const tierCls = pct >= 55 ? " is-high" : v.viewingNumber > 1 ? " is-rewatch" : "";
+      fill.className = `runtime-bar-fill${tierCls}`;
+      fill.style.width = `${pct.toFixed(1)}%`;
+      track.appendChild(fill);
+
+      wrap.appendChild(lbl);
+      wrap.appendChild(track);
+      tdBar.appendChild(wrap);
+
+      const barTitle = v.releaseYear ? `${v.title} (${v.releaseYear})` : v.title;
+      bindTooltip(tdBar, barTitle, [
+        ["Viewing", `#${v.viewingNumber} of ${v.totalViewsForTitle || v.viewingNumber} (${formatDisplayDate(v.watchDate)})`],
+        ["Single Runtime", v.runtimeMinutes ? `${Math.round(v.runtimeMinutes)} mins` : "--"],
+        ["Cumulative Time At Viewing", formatDurationDHM(cumMins, "long")],
+        ["% of Peak Film Commitment", `${pct.toFixed(1)}%`],
+      ]);
+    } else {
+      tdBar.textContent = "--";
+    }
+    tr.appendChild(tdBar);
+
     frag.appendChild(tr);
   });
   tbody.appendChild(frag);
@@ -1588,15 +1691,16 @@ async function init() {
 
     initInsightButtons(payload.insights || {});
 
+    const maxCumMins = payload.meta?.maxCumulativeFilmMinutes || 0;
     ["searchMovie", "searchGenre", "searchYear"].forEach((id) => {
-      document.getElementById(id).addEventListener("input", () => renderViewingLog(payload.viewings || []));
+      document.getElementById(id).addEventListener("input", () => renderViewingLog(payload.viewings || [], maxCumMins));
     });
-    renderViewingLog(payload.viewings || []);
+    renderViewingLog(payload.viewings || [], maxCumMins);
 
     if (payload.meta?.imdbDatasetsIncluded) {
       banner.textContent = payload.meta?.tmdbMediaIncluded
-        ? "Synced with IMDb non-commercial datasets and TMDb posters/portraits."
-        : "Synced with IMDb non-commercial datasets. Add optional TMDB_API_KEY secret in GitHub to display posters and portraits.";
+        ? "Synced with IMDb non-commercial datasets and TMDb posters, descriptions, and portraits."
+        : "Synced with IMDb non-commercial datasets. Add optional TMDB_API_KEY secret in GitHub for posters, synopses, and portraits.";
     } else {
       banner.textContent = "Loaded local starter film log. Run Update MMDb Data in GitHub Actions to sync live IMDb data.";
     }

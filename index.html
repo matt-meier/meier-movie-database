@@ -63,34 +63,37 @@
       </article>
     </section>
 
-    <!-- Most Recent Watch with Poster -->
+    <!-- Most Recent Watch with Poster & Brief Synopsis -->
     <section class="recent-watch-card" aria-label="Most recent film watched">
       <a class="recent-poster-wrap" id="recentPosterWrap" target="_blank" rel="noopener noreferrer" aria-label="Open most recent film on IMDb"></a>
       <div class="recent-body">
         <div class="recent-kicker">MOST RECENT WATCH</div>
         <h2><a id="recentTitle" class="recent-title-link" target="_blank" rel="noopener noreferrer">--</a></h2>
         <p id="recentMeta" class="recent-meta">--</p>
+        <p id="recentOverview" class="recent-overview" hidden></p>
         <div class="recent-pills" id="recentPills"></div>
       </div>
     </section>
 
     <!-- Viewing Timeline + Life Eras Gantt -->
     <section class="panel-card section-block" id="bandTimeline">
-      <div class="panel-head row-between">
-        <div>
-          <h3>Viewing Timeline &amp; Life Eras (2007 to Present)</h3>
-          <p class="panel-sub">Quarterly viewing volume layered directly above major chapters of life. Hover or tap points and era bars for details.</p>
+      <div class="panel-head">
+        <div class="panel-title-row">
+          <div class="panel-title-block">
+            <h3>Viewing Timeline &amp; Life Eras (2007 to Present)</h3>
+            <p class="panel-sub">Quarterly viewing volume layered directly above major chapters of life. Hover or tap points and era bars for details.</p>
+          </div>
+          <div class="insight-wrap">
+            <button type="button" class="insight-btn" data-insight="timeline" aria-expanded="false">Insight</button>
+            <div class="insight-popover" id="popover-timeline"></div>
+          </div>
         </div>
-        <div class="head-controls">
+        <div class="panel-controls-row">
           <div class="tab-group" role="tablist" aria-label="Timeline metric selector">
             <button type="button" class="tab-btn timeline-tab active" data-metric="viewings">Viewings</button>
             <button type="button" class="tab-btn timeline-tab" data-metric="totalHours">Total Runtime</button>
             <button type="button" class="tab-btn timeline-tab" data-metric="rewatchPct">Rewatch %</button>
             <button type="button" class="tab-btn timeline-tab" data-metric="firstWatches">First Watches</button>
-          </div>
-          <div class="insight-wrap">
-            <button type="button" class="insight-btn" data-insight="timeline" aria-expanded="false">Insight</button>
-            <div class="insight-popover" id="popover-timeline"></div>
           </div>
         </div>
       </div>
@@ -100,14 +103,16 @@
 
     <!-- Genres: Lollipop + Lower-Triangle Co-Occurrence Matrix -->
     <section class="panel-card section-block" id="bandGenres">
-      <div class="panel-head row-between">
-        <div>
-          <h3>Genre Profile &amp; Co-Occurrence Overlap</h3>
-          <p class="panel-sub">Gold marks the leading genre and strongest multi-genre pairings across your log.</p>
-        </div>
-        <div class="insight-wrap">
-          <button type="button" class="insight-btn" data-insight="genres" aria-expanded="false">Insight</button>
-          <div class="insight-popover" id="popover-genres"></div>
+      <div class="panel-head">
+        <div class="panel-title-row">
+          <div class="panel-title-block">
+            <h3>Genre Profile &amp; Co-Occurrence Overlap</h3>
+            <p class="panel-sub">Gold marks the leading genre and strongest multi-genre pairings. Hover or tap any genre or overlap cell to see top contributing films.</p>
+          </div>
+          <div class="insight-wrap">
+            <button type="button" class="insight-btn" data-insight="genres" aria-expanded="false">Insight</button>
+            <div class="insight-popover" id="popover-genres"></div>
+          </div>
         </div>
       </div>
       <div class="grid-two-wide">
@@ -118,19 +123,21 @@
 
     <!-- Recency Bias Scatter + Release Era Column Chart -->
     <section class="panel-card section-block" id="bandRecency">
-      <div class="panel-head row-between">
-        <div>
-          <h3>Recency Bias &amp; Release Decade Distribution</h3>
-          <p class="panel-sub">Diagonal line marks same-year watches (gold = watched within 2 years of release). Decade chart highlights peak era in gold.</p>
-        </div>
-        <div class="head-controls">
-          <div class="tab-group" role="tablist" aria-label="Release decade metric selector">
-            <button type="button" class="tab-btn era-tab active" data-metric="uniqueFilms">Unique Films</button>
-            <button type="button" class="tab-btn era-tab" data-metric="cumulativeHours">Cumulative Runtime</button>
+      <div class="panel-head">
+        <div class="panel-title-row">
+          <div class="panel-title-block">
+            <h3>Recency Bias &amp; Release Decade Distribution</h3>
+            <p class="panel-sub">Diagonal line marks same-year watches (gold = watched within 2 years of release). Decade chart highlights peak era in gold.</p>
           </div>
           <div class="insight-wrap">
             <button type="button" class="insight-btn" data-insight="recency" aria-expanded="false">Insight</button>
             <div class="insight-popover" id="popover-recency"></div>
+          </div>
+        </div>
+        <div class="panel-controls-row">
+          <div class="tab-group" role="tablist" aria-label="Release decade metric selector">
+            <button type="button" class="tab-btn era-tab active" data-metric="uniqueFilms">Unique Films</button>
+            <button type="button" class="tab-btn era-tab" data-metric="cumulativeHours">Cumulative Runtime</button>
           </div>
         </div>
       </div>
@@ -142,14 +149,16 @@
 
     <!-- IMDb Rating Histogram + Vote Depth Donut -->
     <section class="panel-card section-block" id="bandRatings">
-      <div class="panel-head row-between">
-        <div>
-          <h3>IMDb Rating Curve &amp; Mainstream vs. Niche Depth</h3>
-          <p class="panel-sub">Gold highlights your modal IMDb rating tier; dashed line marks your viewing-weighted mean score.</p>
-        </div>
-        <div class="insight-wrap">
-          <button type="button" class="insight-btn" data-insight="ratings" aria-expanded="false">Insight</button>
-          <div class="insight-popover" id="popover-ratings"></div>
+      <div class="panel-head">
+        <div class="panel-title-row">
+          <div class="panel-title-block">
+            <h3>IMDb Rating Curve &amp; Mainstream vs. Niche Depth</h3>
+            <p class="panel-sub">Gold highlights your modal IMDb rating tier; dashed line marks your mean score. Hover or tap bars or vote slices to see top contributing films.</p>
+          </div>
+          <div class="insight-wrap">
+            <button type="button" class="insight-btn" data-insight="ratings" aria-expanded="false">Insight</button>
+            <div class="insight-popover" id="popover-ratings"></div>
+          </div>
         </div>
       </div>
       <div class="grid-two-ratings">
@@ -160,21 +169,23 @@
 
     <!-- Top Cast & Crew Portrait Leaderboard -->
     <section class="panel-card section-block" id="bandCredits">
-      <div class="panel-head row-between">
-        <div>
-          <h3>Most Watched Cast &amp; Crew</h3>
-          <p class="panel-sub">Top 10 contributors by logged viewings. Hover or tap any person to view their top watched films.</p>
+      <div class="panel-head">
+        <div class="panel-title-row">
+          <div class="panel-title-block">
+            <h3>Most Watched Cast &amp; Crew</h3>
+            <p class="panel-sub">Top 10 contributors by logged viewings. Hover or tap any person to view their top watched films.</p>
+          </div>
+          <div class="insight-wrap">
+            <button type="button" class="insight-btn" data-insight="credits" aria-expanded="false">Insight</button>
+            <div class="insight-popover" id="popover-credits"></div>
+          </div>
         </div>
-        <div class="head-controls">
+        <div class="panel-controls-row">
           <div class="tab-group" role="tablist" aria-label="Credit role selector">
             <button type="button" class="tab-btn role-tab active" data-role="actors">Actors</button>
             <button type="button" class="tab-btn role-tab" data-role="directors">Directors</button>
             <button type="button" class="tab-btn role-tab" data-role="writers">Writers</button>
             <button type="button" class="tab-btn role-tab" data-role="producers">Producers</button>
-          </div>
-          <div class="insight-wrap">
-            <button type="button" class="insight-btn" data-insight="credits" aria-expanded="false">Insight</button>
-            <div class="insight-popover" id="popover-credits"></div>
           </div>
         </div>
       </div>
@@ -183,15 +194,17 @@
 
     <!-- Most Watched Movies Poster Gallery -->
     <section class="panel-card section-block" id="bandRewatches">
-      <div class="panel-head row-between">
-        <div>
-          <h3>Most Watched Movies of All Time</h3>
-          <p class="panel-sub">Ranked by logged viewings with release year, total watches, and cumulative runtime watched.</p>
-          <div class="link-callout">Click any movie card to open its IMDb page in a new tab.</div>
-        </div>
-        <div class="insight-wrap">
-          <button type="button" class="insight-btn" data-insight="rewatches" aria-expanded="false">Insight</button>
-          <div class="insight-popover" id="popover-rewatches"></div>
+      <div class="panel-head">
+        <div class="panel-title-row">
+          <div class="panel-title-block">
+            <h3>Most Watched Movies of All Time</h3>
+            <p class="panel-sub">Ranked by logged viewings with release year, total watches, and cumulative runtime watched.</p>
+            <div class="link-callout">Click any movie card to open its IMDb page in a new tab.</div>
+          </div>
+          <div class="insight-wrap">
+            <button type="button" class="insight-btn" data-insight="rewatches" aria-expanded="false">Insight</button>
+            <div class="insight-popover" id="popover-rewatches"></div>
+          </div>
         </div>
       </div>
       <div id="topRewatchedGallery" class="poster-gallery"></div>
@@ -199,14 +212,16 @@
 
     <!-- Viewing Rhythm: Calendar Heatmap, Runtime Line, Rewatch Latency Strip -->
     <section class="panel-card section-block" id="bandBehavior">
-      <div class="panel-head row-between">
-        <div>
-          <h3>Viewing Cadence, Runtime Shift &amp; Rewatch Latency</h3>
-          <p class="panel-sub">Month by weekday viewing heat, average runtime trajectory over time, and time elapsed between rewatches.</p>
-        </div>
-        <div class="insight-wrap">
-          <button type="button" class="insight-btn" data-insight="behavior" aria-expanded="false">Insight</button>
-          <div class="insight-popover" id="popover-behavior"></div>
+      <div class="panel-head">
+        <div class="panel-title-row">
+          <div class="panel-title-block">
+            <h3>Viewing Cadence, Runtime Shift &amp; Rewatch Latency</h3>
+            <p class="panel-sub">Month by weekday viewing heat, average runtime trajectory, and rewatch gaps. Hover or tap any data point to see top contributing films.</p>
+          </div>
+          <div class="insight-wrap">
+            <button type="button" class="insight-btn" data-insight="behavior" aria-expanded="false">Insight</button>
+            <div class="insight-popover" id="popover-behavior"></div>
+          </div>
         </div>
       </div>
       <div class="grid-two-equal">
@@ -218,16 +233,20 @@
 
     <!-- Complete Scrollable Viewing Log -->
     <section class="panel-card section-block" id="bandLog">
-      <div class="panel-head row-between">
-        <div>
-          <h3>Complete Viewing Log (Newest First)</h3>
-          <p class="panel-sub" id="logCountLabel">Showing all logged viewings.</p>
-          <div class="link-callout">Click any film title below to open its IMDb page in a new tab.</div>
+      <div class="panel-head">
+        <div class="panel-title-row">
+          <div class="panel-title-block">
+            <h3>Complete Viewing Log (Newest First)</h3>
+            <p class="panel-sub" id="logCountLabel">Showing all logged viewings.</p>
+            <div class="link-callout">Click any film title below to open its IMDb page in a new tab.</div>
+          </div>
         </div>
-        <div class="log-filters">
-          <input type="search" id="searchMovie" placeholder="Search movie or ID..." aria-label="Search movie" />
-          <input type="search" id="searchGenre" placeholder="Filter genre..." aria-label="Filter genre" />
-          <input type="search" id="searchYear" placeholder="Filter year..." aria-label="Filter year" />
+        <div class="panel-controls-row">
+          <div class="log-filters">
+            <input type="search" id="searchMovie" placeholder="Search movie or ID..." aria-label="Search movie" />
+            <input type="search" id="searchGenre" placeholder="Filter genre..." aria-label="Filter genre" />
+            <input type="search" id="searchYear" placeholder="Filter year..." aria-label="Filter year" />
+          </div>
         </div>
       </div>
       <div class="log-scroll-wrap" id="viewingLogWrap">
@@ -241,7 +260,7 @@
               <th class="num-col">IMDb</th>
               <th class="num-col">Runtime</th>
               <th class="num-col">Viewing #</th>
-              <th class="num-col">Total Runtime Watched</th>
+              <th class="num-col runtime-bar-th">Total Runtime Watched (At Viewing)</th>
             </tr>
           </thead>
           <tbody id="viewingLogBody"></tbody>

@@ -63,7 +63,7 @@ def load_film_log(csv_path: str | None) -> pd.DataFrame:
         sheet_url = os.environ.get("SHEET_CSV_URL", "").strip()
         if not sheet_url:
             raise ValueError("Provide --csv or set SHEET_CSV_URL environment variable.")
-        req = urllib.request.Request(sheet_url, headers={"User-Agent": "MMDb-Sync/3.0"})
+        req = urllib.request.Request(sheet_url, headers={"User-Agent": "MMDb-Sync/4.0"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw_bytes = resp.read()
         df = pd.read_csv(io.BytesIO(raw_bytes), dtype=str)
@@ -99,7 +99,7 @@ def load_film_log(csv_path: str | None) -> pd.DataFrame:
 
 
 def download_gz_bytes(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "MMDb-Sync/3.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "MMDb-Sync/4.0"})
     with urllib.request.urlopen(req, timeout=180) as resp:
         return resp.read()
 
@@ -184,16 +184,20 @@ def parse_principals_and_names(
     return resolved_title_credits, name_lookup
 
 
-def load_existing_media_cache(out_path: Path) -> tuple[dict[str, str], dict[str, str]]:
+def load_existing_media_cache(out_path: Path) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     posters: dict[str, str] = {}
     profiles: dict[str, str] = {}
+    overviews: dict[str, str] = {}
     if not out_path.exists():
-        return posters, profiles
+        return posters, profiles, overviews
     try:
         prev = json.loads(out_path.read_text(encoding="utf-8"))
         mrw = prev.get("mostRecentWatch") or {}
-        if mrw.get("imdbId") and mrw.get("posterUrl"):
-            posters[mrw["imdbId"]] = mrw["posterUrl"]
+        if mrw.get("imdbId"):
+            if mrw.get("posterUrl"):
+                posters[mrw["imdbId"]] = mrw["posterUrl"]
+            if mrw.get("overview"):
+                overviews[mrw["imdbId"]] = mrw["overview"]
         for item in prev.get("topRewatched") or []:
             if item.get("imdbId") and item.get("posterUrl"):
                 posters[item["imdbId"]] = item["posterUrl"]
@@ -203,13 +207,13 @@ def load_existing_media_cache(out_path: Path) -> tuple[dict[str, str], dict[str,
                     profiles[person["nconst"]] = person["profileUrl"]
     except Exception:
         pass
-    return posters, profiles
+    return posters, profiles, overviews
 
 
-def fetch_tmdb_media(imdb_id: str, media_kind: str, tmdb_token: str) -> str | None:
+def fetch_tmdb_title_details(imdb_id: str, tmdb_token: str) -> tuple[str | None, str | None]:
     if not tmdb_token or not imdb_id:
-        return None
-    headers = {"Accept": "application/json", "User-Agent": "MMDb-Sync/3.0"}
+        return None, None
+    headers = {"Accept": "application/json", "User-Agent": "MMDb-Sync/4.0"}
     params = {"external_source": "imdb_id"}
     if len(tmdb_token) > 45:
         headers["Authorization"] = f"Bearer {tmdb_token}"
@@ -221,19 +225,40 @@ def fetch_tmdb_media(imdb_id: str, media_kind: str, tmdb_token: str) -> str | No
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=12) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        if media_kind == "poster":
-            for key in ("movie_results", "tv_results"):
-                items = data.get(key) or []
-                for item in items:
-                    pp = item.get("poster_path")
-                    if pp:
-                        return f"{TMDB_POSTER_BASE}{pp}"
-        elif media_kind == "profile":
-            items = data.get("person_results") or []
+        for key in ("movie_results", "tv_results"):
+            items = data.get(key) or []
             for item in items:
-                pp = item.get("profile_path")
-                if pp:
-                    return f"{TMDB_PROFILE_BASE}{pp}"
+                pp = item.get("poster_path")
+                ov = item.get("overview")
+                poster_url = f"{TMDB_POSTER_BASE}{pp}" if pp else None
+                overview_txt = str(ov).strip() if ov and str(ov).strip() else None
+                if poster_url or overview_txt:
+                    return poster_url, overview_txt
+    except Exception:
+        return None, None
+    return None, None
+
+
+def fetch_tmdb_profile(imdb_id: str, tmdb_token: str) -> str | None:
+    if not tmdb_token or not imdb_id:
+        return None
+    headers = {"Accept": "application/json", "User-Agent": "MMDb-Sync/4.0"}
+    params = {"external_source": "imdb_id"}
+    if len(tmdb_token) > 45:
+        headers["Authorization"] = f"Bearer {tmdb_token}"
+    else:
+        params["api_key"] = tmdb_token
+
+    url = f"{TMDB_API_BASE}/find/{urllib.parse.quote(imdb_id)}?{urllib.parse.urlencode(params)}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        items = data.get("person_results") or []
+        for item in items:
+            pp = item.get("profile_path")
+            if pp:
+                return f"{TMDB_PROFILE_BASE}{pp}"
     except Exception:
         return None
     return None
@@ -252,6 +277,35 @@ def fmt_dhm(minutes: float | None) -> str:
     if days > 0:
         return f"{days:,} {d_lbl}, {hrs} {h_lbl}, {mins} {m_lbl}"
     return f"{hrs} {h_lbl}, {mins} {m_lbl}"
+
+
+def top_films_from_counter(
+    counter: Counter,
+    canonical_title: dict[str, str],
+    basics_map: dict[str, dict],
+    ratings_map: dict[str, dict],
+    limit: int = 5,
+    include_runtime: bool = False,
+    include_rating: bool = False,
+) -> list[dict]:
+    sorted_items = sorted(
+        counter.items(),
+        key=lambda kv: (-kv[1], canonical_title.get(kv[0], kv[0])),
+    )
+    out = []
+    for tc, cnt in sorted_items[:limit]:
+        entry = {
+            "title": canonical_title.get(tc, tc),
+            "releaseYear": basics_map.get(tc, {}).get("releaseYear"),
+            "views": int(cnt),
+        }
+        if include_runtime:
+            rt = basics_map.get(tc, {}).get("runtimeMinutes")
+            entry["runtimeMinutes"] = None if rt is None else int(round(float(rt)))
+        if include_rating:
+            entry["imdbRating"] = ratings_map.get(tc, {}).get("averageRating")
+        out.append(entry)
+    return out
 
 
 def build_dynamic_insights(payload: dict) -> dict[str, str]:
@@ -403,10 +457,12 @@ def build_payload(
     tmdb_token: str = "",
     cached_posters: dict[str, str] | None = None,
     cached_profiles: dict[str, str] | None = None,
+    cached_overviews: dict[str, str] | None = None,
     mock_imdb: tuple[dict, dict, dict] | None = None,
 ) -> dict:
     cached_posters = cached_posters or {}
     cached_profiles = cached_profiles or {}
+    cached_overviews = cached_overviews or {}
 
     log_df = log_df.sort_values(["watch_dt", "IMDb ID"]).reset_index(drop=True)
     log_df["viewing_number"] = log_df.groupby("IMDb ID").cumcount() + 1
@@ -445,18 +501,28 @@ def build_payload(
 
     full_viewings = []
     total_minutes = 0.0
+    max_cumulative_film_minutes = 0.0
     for idx, row in log_df.iterrows():
         tc = row["IMDb ID"]
         b = basics_map.get(tc, {})
         r = ratings_map.get(tc, {})
         c = credits_map.get(tc, {})
         rt = b.get("runtimeMinutes")
+        vn = int(row["viewing_number"])
+        total_v_for_title = int(row["total_views_for_title"])
         if rt is not None and np.isfinite(rt):
             total_minutes += float(rt)
+            # Point-in-time cumulative runtime devoted to this film AT THIS VIEWING
+            cum_mins_at_viewing = round(float(rt) * vn, 1)
+            total_film_mins = round(float(rt) * total_v_for_title, 1)
+            if cum_mins_at_viewing > max_cumulative_film_minutes:
+                max_cumulative_film_minutes = cum_mins_at_viewing
+        else:
+            cum_mins_at_viewing = None
+            total_film_mins = None
+
         rel_yr = b.get("releaseYear")
         recency_lag = (int(row["watch_year"]) - int(rel_yr)) if rel_yr is not None else None
-        total_v_for_title = int(row["total_views_for_title"])
-        total_film_mins = round(float(rt) * total_v_for_title, 1) if rt is not None and np.isfinite(rt) else None
 
         full_viewings.append(
             {
@@ -471,6 +537,7 @@ def build_payload(
                 "releaseYear": rel_yr,
                 "recencyLagYears": recency_lag,
                 "runtimeMinutes": rt,
+                "cumulativeFilmMinutes": cum_mins_at_viewing,
                 "totalFilmMinutes": total_film_mins,
                 "genres": b.get("genres", []),
                 "imdbRating": r.get("averageRating"),
@@ -479,7 +546,7 @@ def build_payload(
                 "writers": c.get("writers", []),
                 "producers": c.get("producers", []),
                 "actors": c.get("actors", []),
-                "viewingNumber": int(row["viewing_number"]),
+                "viewingNumber": vn,
                 "totalViewsForTitle": total_v_for_title,
                 "daysSincePrevWatch": None if pd.isna(row["days_since_prev_watch"]) else int(row["days_since_prev_watch"]),
             }
@@ -587,16 +654,42 @@ def build_payload(
             }
         )
 
-    # Genres & co-occurrence
+    # Genres & co-occurrence WITH top contributing films
     genre_view_counts = Counter()
+    genre_film_counts: dict[str, Counter] = defaultdict(Counter)
     co_counts = Counter()
+    co_film_counts: dict[tuple[str, str], Counter] = defaultdict(Counter)
     for v in full_viewings:
+        tc = v["imdbId"]
         gs = sorted(set(v["genres"]))
         for g in gs:
             genre_view_counts[g] += 1
+            genre_film_counts[g][tc] += 1
         for i in range(len(gs)):
             for j in range(i + 1, len(gs)):
-                co_counts[(gs[i], gs[j])] += 1
+                pair = (gs[i], gs[j])
+                co_counts[pair] += 1
+                co_film_counts[pair][tc] += 1
+
+    genres_counts_out = [
+        {
+            "genre": g,
+            "viewings": c,
+            "uniqueFilms": len(genre_film_counts[g]),
+            "topFilms": top_films_from_counter(genre_film_counts[g], canonical_title, basics_map, ratings_map, limit=5),
+        }
+        for g, c in genre_view_counts.most_common()
+    ]
+    genres_co_out = [
+        {
+            "genreA": a,
+            "genreB": b,
+            "viewings": c,
+            "uniqueFilms": len(co_film_counts[(a, b)]),
+            "topFilms": top_films_from_counter(co_film_counts[(a, b)], canonical_title, basics_map, ratings_map, limit=5),
+        }
+        for (a, b), c in co_counts.most_common(60)
+    ]
 
     # Cast & crew aggregations + top films per person
     role_counters: dict[str, Counter] = {
@@ -632,25 +725,13 @@ def build_payload(
         for nm, cnt in counter.most_common(12):
             profile_url = cached_profiles.get(nm)
             if not profile_url and tmdb_token:
-                profile_url = fetch_tmdb_media(nm, "profile", tmdb_token)
+                profile_url = fetch_tmdb_profile(nm, tmdb_token)
                 if profile_url:
                     cached_profiles[nm] = profile_url
                 time.sleep(0.05)
 
             film_counts = role_film_views[role][nm]
-            sorted_films = sorted(
-                film_counts.items(),
-                key=lambda kv: (-kv[1], canonical_title.get(kv[0], kv[0])),
-            )
-            top_films = [
-                {
-                    "imdbId": ftc,
-                    "title": canonical_title.get(ftc, ftc),
-                    "releaseYear": basics_map.get(ftc, {}).get("releaseYear"),
-                    "views": fcnt,
-                }
-                for ftc, fcnt in sorted_films[:6]
-            ]
+            top_films = top_films_from_counter(film_counts, canonical_title, basics_map, ratings_map, limit=6)
             top_list.append(
                 {
                     "nconst": nm,
@@ -693,19 +774,28 @@ def build_payload(
         tc = item["imdbId"]
         purl = cached_posters.get(tc)
         if not purl and tmdb_token:
-            purl = fetch_tmdb_media(tc, "poster", tmdb_token)
+            purl, ov = fetch_tmdb_title_details(tc, tmdb_token)
             if purl:
                 cached_posters[tc] = purl
+            if ov:
+                cached_overviews[tc] = ov
             time.sleep(0.05)
         item["posterUrl"] = purl
 
-    latest_poster = cached_posters.get(latest["imdbId"])
-    if not latest_poster and tmdb_token:
-        latest_poster = fetch_tmdb_media(latest["imdbId"], "poster", tmdb_token)
-        if latest_poster:
-            cached_posters[latest["imdbId"]] = latest_poster
+    # Most Recent Watch poster + brief description (overview)
+    latest_tc = latest["imdbId"]
+    latest_poster = cached_posters.get(latest_tc)
+    latest_overview = cached_overviews.get(latest_tc)
+    if (not latest_poster or not latest_overview) and tmdb_token:
+        fetched_poster, fetched_overview = fetch_tmdb_title_details(latest_tc, tmdb_token)
+        if fetched_poster and not latest_poster:
+            latest_poster = fetched_poster
+            cached_posters[latest_tc] = fetched_poster
+        if fetched_overview and not latest_overview:
+            latest_overview = fetched_overview
+            cached_overviews[latest_tc] = fetched_overview
 
-    # Seasonality: monthly, weekday, and 12x7 Month x Weekday matrix
+    # Seasonality: monthly, weekday, and 12x7 Month x Weekday matrix WITH top films
     month_order = list(range(1, 13))
     month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     dow_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -720,16 +810,21 @@ def build_payload(
         for i, d in enumerate(dow_order)
     ]
 
-    md_counts = Counter((v["watchMonth"], v["watchDow"]) for v in full_viewings)
+    md_counts = Counter()
     md_mins = defaultdict(float)
+    md_film_counts: dict[tuple[int, str], Counter] = defaultdict(Counter)
     for v in full_viewings:
+        key = (v["watchMonth"], v["watchDow"])
+        md_counts[key] += 1
+        md_film_counts[key][v["imdbId"]] += 1
         if v["runtimeMinutes"] is not None:
-            md_mins[(v["watchMonth"], v["watchDow"])] += float(v["runtimeMinutes"])
+            md_mins[key] += float(v["runtimeMinutes"])
 
     season_matrix = []
     for m in month_order:
         for i, d in enumerate(dow_order):
-            cell_mins = md_mins.get((m, d), 0.0)
+            key = (m, d)
+            cell_mins = md_mins.get(key, 0.0)
             season_matrix.append(
                 {
                     "month": m,
@@ -737,20 +832,45 @@ def build_payload(
                     "dayIndex": i,
                     "day": d,
                     "dayShort": dow_short[i],
-                    "viewings": md_counts.get((m, d), 0),
+                    "viewings": md_counts.get(key, 0),
+                    "uniqueFilms": len(md_film_counts[key]),
                     "totalMinutes": round(cell_mins, 1),
                     "totalHours": round(cell_mins / 60.0, 1),
+                    "topFilms": top_films_from_counter(md_film_counts[key], canonical_title, basics_map, ratings_map, limit=5),
                 }
             )
 
-    # Rewatch latency
-    gaps = [v["daysSincePrevWatch"] for v in full_viewings if v["daysSincePrevWatch"] is not None]
+    # Rewatch latency WITH top films per bucket
+    gaps = []
+    latency_bucket_names = ["Within 30d", "31-180d", "181-365d", "1-3 yrs", "3+ yrs"]
+    latency_counts = Counter()
+    latency_film_counts: dict[str, Counter] = defaultdict(Counter)
+    for v in full_viewings:
+        g = v["daysSincePrevWatch"]
+        if g is None:
+            continue
+        gaps.append(g)
+        if g <= 30:
+            bname = "Within 30d"
+        elif g <= 180:
+            bname = "31-180d"
+        elif g <= 365:
+            bname = "181-365d"
+        elif g <= 1095:
+            bname = "1-3 yrs"
+        else:
+            bname = "3+ yrs"
+        latency_counts[bname] += 1
+        latency_film_counts[bname][v["imdbId"]] += 1
+
     latency_buckets = [
-        {"bucket": "Within 30d", "count": sum(1 for g in gaps if g <= 30)},
-        {"bucket": "31-180d", "count": sum(1 for g in gaps if 31 <= g <= 180)},
-        {"bucket": "181-365d", "count": sum(1 for g in gaps if 181 <= g <= 365)},
-        {"bucket": "1-3 yrs", "count": sum(1 for g in gaps if 366 <= g <= 1095)},
-        {"bucket": "3+ yrs", "count": sum(1 for g in gaps if g > 1095)},
+        {
+            "bucket": bname,
+            "count": latency_counts[bname],
+            "uniqueFilms": len(latency_film_counts[bname]),
+            "topFilms": top_films_from_counter(latency_film_counts[bname], canonical_title, basics_map, ratings_map, limit=5),
+        }
+        for bname in latency_bucket_names
     ]
 
     # Release eras
@@ -774,21 +894,34 @@ def build_payload(
         for dec in sorted(era_unique.keys())
     ]
 
-    # Rating distribution
+    # Rating distribution WITH top contributing films
     rating_bins = defaultdict(int)
+    rating_film_counts: dict[float, Counter] = defaultdict(Counter)
     for v in full_viewings:
         rtg = v["imdbRating"]
         if rtg is not None:
             b_val = round(float(rtg) * 2) / 2
             rating_bins[b_val] += 1
+            rating_film_counts[b_val][v["imdbId"]] += 1
 
-    rating_distribution = [{"rating": k, "viewings": rating_bins[k]} for k in sorted(rating_bins.keys())]
+    rating_distribution = [
+        {
+            "rating": k,
+            "viewings": rating_bins[k],
+            "uniqueFilms": len(rating_film_counts[k]),
+            "topFilms": top_films_from_counter(rating_film_counts[k], canonical_title, basics_map, ratings_map, limit=5, include_rating=True),
+        }
+        for k in sorted(rating_bins.keys())
+    ]
 
-    # Runtime trend by watch year
+    # Runtime trend by watch year WITH top contributing films
     rt_by_yr: dict[int, list[float]] = defaultdict(list)
+    rt_yr_film_counts: dict[int, Counter] = defaultdict(Counter)
     for v in full_viewings:
         if v["runtimeMinutes"] is not None:
-            rt_by_yr[v["watchYear"]].append(float(v["runtimeMinutes"]))
+            yr = v["watchYear"]
+            rt_by_yr[yr].append(float(v["runtimeMinutes"]))
+            rt_yr_film_counts[yr][v["imdbId"]] += 1
 
     runtime_by_watch_year = [
         {
@@ -796,29 +929,43 @@ def build_payload(
             "avgRuntimeMinutes": round(float(np.mean(vals)), 1),
             "totalMinutes": round(float(np.sum(vals)), 1),
             "totalHours": round(float(np.sum(vals)) / 60.0, 1),
+            "uniqueFilms": len(rt_yr_film_counts[yr]),
+            "topFilms": top_films_from_counter(rt_yr_film_counts[yr], canonical_title, basics_map, ratings_map, limit=5, include_runtime=True),
         }
         for yr, vals in sorted(rt_by_yr.items())
     ]
 
-    # Vote depth
+    # Vote depth WITH top contributing films
     vote_tiers = Counter()
+    vote_tier_films: dict[str, Counter] = defaultdict(Counter)
     for v in full_viewings:
         nv = v["numVotes"]
         if nv is None:
-            vote_tiers["Unknown"] += 1
+            tier = "Unknown"
         elif nv >= 250_000:
-            vote_tiers["Blockbuster (250k+)"] += 1
+            tier = "Blockbuster (250k+)"
         elif nv >= 50_000:
-            vote_tiers["Mainstream (50k-250k)"] += 1
+            tier = "Mainstream (50k-250k)"
         elif nv >= 10_000:
-            vote_tiers["Cult / Mid-Tier (10k-50k)"] += 1
+            tier = "Cult / Mid-Tier (10k-50k)"
         else:
-            vote_tiers["Niche (<10k)"] += 1
+            tier = "Niche (<10k)"
+        vote_tiers[tier] += 1
+        vote_tier_films[tier][v["imdbId"]] += 1
 
     tier_order = ["Blockbuster (250k+)", "Mainstream (50k-250k)", "Cult / Mid-Tier (10k-50k)", "Niche (<10k)", "Unknown"]
-    vote_depth_out = [{"tier": t, "viewings": vote_tiers[t]} for t in tier_order if vote_tiers[t] > 0]
+    vote_depth_out = [
+        {
+            "tier": t,
+            "viewings": vote_tiers[t],
+            "uniqueFilms": len(vote_tier_films[t]),
+            "topFilms": top_films_from_counter(vote_tier_films[t], canonical_title, basics_map, ratings_map, limit=5),
+        }
+        for t in tier_order
+        if vote_tiers[t] > 0
+    ]
 
-    # Trimmed viewings for table + scatter
+    # Trimmed viewings for table + scatter (includes point-in-time cumulativeFilmMinutes)
     trimmed_viewings = [
         {
             "watchDate": v["watchDate"],
@@ -828,7 +975,7 @@ def build_payload(
             "releaseYear": v["releaseYear"],
             "recencyLagYears": v["recencyLagYears"],
             "runtimeMinutes": v["runtimeMinutes"],
-            "totalFilmMinutes": v["totalFilmMinutes"],
+            "cumulativeFilmMinutes": v["cumulativeFilmMinutes"],
             "genres": v["genres"],
             "imdbRating": v["imdbRating"],
             "viewingNumber": v["viewingNumber"],
@@ -847,6 +994,7 @@ def build_payload(
             },
             "imdbDatasetsIncluded": bool(use_imdb or mock_imdb is not None),
             "tmdbMediaIncluded": bool(tmdb_token and (latest_poster or any(i.get("posterUrl") for i in top_rewatched))),
+            "maxCumulativeFilmMinutes": round(max_cumulative_film_minutes, 1),
         },
         "kpis": {
             "uniqueFilms": unique_films,
@@ -865,22 +1013,20 @@ def build_payload(
             "releaseYear": latest["releaseYear"],
             "imdbRating": latest["imdbRating"],
             "runtimeMinutes": latest["runtimeMinutes"],
-            "totalFilmMinutes": latest["totalFilmMinutes"],
+            "totalFilmMinutes": latest["cumulativeFilmMinutes"],
             "genres": latest["genres"],
             "viewingNumber": latest["viewingNumber"],
             "totalViewsForTitle": latest["totalViewsForTitle"],
             "daysSincePrevWatch": latest["daysSincePrevWatch"],
             "prevWatchDate": prev_view["watchDate"] if prev_view else None,
             "posterUrl": latest_poster,
+            "overview": latest_overview,
         },
         "timeline": timeline,
         "lifeEras": life_eras_out,
         "genres": {
-            "counts": [{"genre": g, "viewings": c} for g, c in genre_view_counts.most_common()],
-            "coOccurrence": [
-                {"genreA": a, "genreB": b, "viewings": c}
-                for (a, b), c in co_counts.most_common(60)
-            ],
+            "counts": genres_counts_out,
+            "coOccurrence": genres_co_out,
         },
         "credits": credits_out,
         "topRewatched": top_rewatched,
@@ -912,7 +1058,7 @@ def main() -> None:
     args = parser.parse_args()
 
     out_path = Path(args.out)
-    cached_posters, cached_profiles = load_existing_media_cache(out_path)
+    cached_posters, cached_profiles, cached_overviews = load_existing_media_cache(out_path)
     tmdb_token = os.environ.get("TMDB_API_KEY", "").strip()
 
     log_df = load_film_log(args.csv)
@@ -922,6 +1068,7 @@ def main() -> None:
         tmdb_token=tmdb_token,
         cached_posters=cached_posters,
         cached_profiles=cached_profiles,
+        cached_overviews=cached_overviews,
     )
     json_str = json.dumps(payload, separators=(",", ":"), allow_nan=False)
 

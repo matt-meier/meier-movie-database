@@ -1,11 +1,10 @@
-# Meier Movie Database (MMDb) v3
+# Meier Movie Database (MMDb) v4
 
-Self-contained static data app hosted on GitHub Pages and embedded in Tableau Public, with automated daily IMDb syncing and optional TMDb movie posters and cast/crew portraits.
+Self-contained static data app hosted on GitHub Pages and embedded in Tableau Public, with automated daily IMDb syncing and optional TMDb movie posters, film descriptions, and cast/crew portraits.
 
-## What Is New in v3
+## What Is New in v4
 
-- Cumulative watch time formatted as Days, Hours, Minutes across KPIs, charts, tooltips, insights, and the viewing log.
-- All watch dates formatted as `MMM DD, YYYY` (for example, `Nov 23, 2026`).
-- Cast and crew tooltips list each contributor's top watched films with viewing counts.
-- Individual films in Most Recent Watch, Most Watched Movies, and the Complete Viewing Log link directly to their IMDb title pages (`https://www.imdb.com/title/<id>/`) with clear callouts.
-- Mobile-friendly tap-to-pin tooltips with a built-in close (`X`) button.
+- Every panel anchors its **Insight** button consistently in the top-right corner, with chart toggles cleanly placed on their own controls row below the header.
+- Most Recent Watch displays the film's brief description (`overview`) automatically via TMDb alongside poster, metadata, and viewing ordinal.
+- Tooltips across **Genre Profile & Overlap**, **IMDb Rating Curve & Vote Depth**, and **Viewing Cadence, Runtime Shift & Rewatch Latency** list the top contributing films for every datapoint.
+- The **Complete Viewing Log** calculates **Total Runtime Watched (At Viewing)** as point-in-time cumulative time (`runtimeMinutes * viewingNumber`) and layers an inline horizontal bar chart scaled to your all-time peak film commitment.
